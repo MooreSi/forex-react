@@ -386,3 +386,84 @@ Floors raised for `backend/src/api` (94.6 → 94.7) and
 the same authority this panel has always had — but it now does so on a machine
 the operator is not sitting at. It belongs with the handover and task 060 in
 the demo session that is still owed.
+
+---
+
+# Task 150 — a halt nobody could see, and the gate that was blind (2026-09-18)
+
+## The circuit breaker was invisible
+
+Two independent things stop automated entries and they are stored under
+different keys: the **risk governor** writes `trade_pause_until` with
+`risk_halt_reason`, and the **circuit breaker** writes
+`circuit_breaker_active_until` onto the risk-settings row after a losing streak.
+
+The NiceGUI header badge read both. The React header read only the governor, so
+**a tripped circuit breaker appeared on no screen except Settings >
+Diagnostics** — an operator looking at the bar that is on every tab would have
+believed automated entries were running while they were being refused.
+
+Worse, the Trading tab *thought* it was checking. It read
+`circuit_breaker.tripped`, and the repo has never returned a `tripped` key —
+`is_active` is the authoritative one. So the check was dead code: a tripped
+breaker left the Execute button **enabled** with no explanation, the backend
+refused the order, and the operator found out by pressing it. This repo already
+says a disabled Execute button with no explanation is indistinguishable from a
+broken one; an enabled one that cannot work is worse.
+
+`services/risk/pause_status.py` answers both now, with the reason and the
+resume time, and reports the LATER of the two expiries — trading resumes when
+the last of them lifts, and giving the earlier one tells the operator to expect
+entries that will still be refused.
+
+**It is a read, and deliberately not the enforcement path.**
+`governor.is_trading_paused()` is the last line of defence and fails CLOSED on
+an unreadable database. This one fails the other way: it renders on every
+header refresh, so an error costs the explanation, never the halt. A test pins
+that it ASKS rather than re-deriving, because a second and laxer copy of that
+logic would eventually be the one somebody wired into a decision.
+
+## The gate that could not see half the layer
+
+`test_controller_operations_have_callers` walks each controller's `__all__`.
+**Thirty public operations across eight controllers were never in it**, so the
+gate had never checked any of them. Declaring them all immediately surfaced
+five with no caller at all:
+
+| Operation | Outcome |
+|---|---|
+| `engines_controller.pro_model_fit` | **Removed.** The blocking refit stops the event loop for ~5s, taking the EA socket reader and the monitor loop with it (bugs/030). No router may call it, and a controller operation exists for a router. The service keeps it for the command line. |
+| `engines_controller.reversal_macro_backfill` | **Removed.** A manual repair tool that changes what the ML gate learns at its next retrain — not something to leave one HTTP route away. |
+| `engines_controller.reversal_reset_stats` | **Wired** — `POST /api/engines/reversal/reset-stats`. Reporting only, and the endpoint says so: "reset" next to a machine-learning engine reads as "forget what you learned". |
+| `auth_controller.load_licence` | **Wired** — `GET /api/node/licence`, with the key masked in the backend. A credential never leaves the machine whole. |
+| `trading_controller.describe_strategy` | **Wired** — each channel-strategy recommendation now carries its human label, so the browser holds no id-to-name mapping and a retired strategy renders as itself rather than blank. |
+
+Also removed: the **eighteen `STRATEGY_*` constants** re-exported through
+`trading_controller`. They existed so Python frontend pages did not have to
+import `utils.models`; those pages are gone, the browser gets the catalogue as
+JSON, and nothing called a single one of them through the controller. They were
+invisible to the caller gate for a different reason — its scan is a substring
+search over `backend/`, and every name appears there in the service that
+genuinely uses it.
+
+## Evidence
+
+```
+python -m tools.checks all   ->  11 of 11, green   (8,556 tests)
+npm test                     ->  252 passed
+```
+
+16 mutations planted (6 on `pause_status`, 3 on the Trading tab's breaker
+check, and the rest on the header); all caught.
+
+Public controller operations not declared in `__all__`: **30 → 0.**
+
+## Also found, not fixed
+
+A latent circular import between `backend/src/db/` and
+`services/cluster/sync_repo`: importing `remote_node_controller` as the very
+first module fails. The app never hits it because its startup order happens to
+import `backend.src.db` first, which means the repo is one import-line reorder
+away from a boot failure with no gate watching. Raised as its own task rather
+than folded in here — it is an import-order fix plus a new gate, and it touches
+the data layer.
