@@ -12,10 +12,11 @@ that is not is the exact failure this repo's rules exist to prevent.
 | Metric | Command | At start (2026-09-18) | Now (2026-09-18) |
 |---|---|---|---|
 | NiceGUI Python lines under `frontend/` | `find frontend -name '*.py' -not -path '*/node_modules/*' \| xargs wc -l` | 21,434 | **0** |
-| Tabs served by React | — | 0 / 10 | **2 / 10** (Chart, Trading) |
+| Tabs served by React | — | 0 / 10 | **10 / 10** |
 | Top-layer import contracts | `python -m tools.refactor_audit.import_contracts --check` | 2, at zero, scanning `frontend/` | 2, at zero, scanning `backend/src/api/` |
 | `no-nicegui-in-the-backend` | same | 2, baselined | 2, baselined — the licence screens, task 090 |
-| Modules orphaned by the port | `python -m tools.refactor_audit.orphan_modules --check` | 0 | **32**, allowlisted as `awaiting-react-port` |
+| Modules orphaned by the port | `python -m tools.refactor_audit.orphan_modules --check` | 0 | **4** (was 32; 26 regained callers when the tabs landed) |
+| Controller operations with no caller | `pytest tests/refactor/test_controller_operations_have_callers.py` | 0 | **31** (was 47) |
 
 Update this block when a task lands. It is the pack's only honest progress metric.
 
@@ -30,7 +31,8 @@ Update this block when a task lands. It is the pack's only honest progress metri
 | 050 | Chart tab | no | done (2026-09-18) | Claude | Candles, EMA 9/21/50, RSI, FVG zones, bid/ask lines, open-position markers and a trades panel. lightweight-charts. |
 | 060 | Trading tab | **YES** | **code complete, NOT signed off** | Claude | Positions with close, signals list, manual market order with a two-step confirmation. **No demo session has been run. The order and close paths have never executed against a broker through this UI.** See "Sign-off owed" below. |
 | 070 | Remove NiceGUI | no | done (2026-09-18) | Claude | 21,434 lines and 57 test files deleted. Three tests kept and relocated; 32 backend modules allowlisted as orphaned-by-the-port. |
-| 080 | The remaining eight tabs | mixed | not started | — | 8 tabs render an honest placeholder naming this task |
+| 080 | The remaining eight tabs | mixed | done (2026-09-18) | Claude | All ten tabs are React. Three are narrower than their originals for boundary reasons, named in the task file. |
+| 100 | The rest of the Trading tab | **YES** | not started | — | manual limit order, EA templates, schedule, strategy cards, pending-signal editor |
 | 090 | Licence screens | no | not started | — | still NiceGUI; the reason `nicegui` is still a dependency |
 
 ## Coverage, after the port
@@ -46,6 +48,18 @@ moving the floors, and all three now sit **above** where they started:
 | `backend/src/api` | — | — | **88.4%** | 88.4 (new) |
 
 `python -m tools.checks all` is green, 11 of 11.
+
+## What the ported tabs do NOT include
+
+Stated here so it is not discovered later:
+
+- **Trading** still has only Positions, Signals and the market order. Manual
+  limit orders, EA templates, the schedule, strategy cards and the
+  pending-signal editor are task 100.
+- **Analysis** has no deal-level trade table. It needs `get_deal_history`
+  through a controller, which does not exist — the NiceGUI page reached
+  `engine._bridge` directly, which this layer may not do.
+- **Remote node** and **Update panel** were never tabs and are not ported.
 
 ## Sign-off owed
 
