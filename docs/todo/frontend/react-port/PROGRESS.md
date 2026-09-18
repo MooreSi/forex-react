@@ -15,8 +15,8 @@ that is not is the exact failure this repo's rules exist to prevent.
 | Tabs served by React | — | 0 / 10 | **10 / 10** |
 | Top-layer import contracts | `python -m tools.refactor_audit.import_contracts --check` | 2, at zero, scanning `frontend/` | 2, at zero, scanning `backend/src/api/` |
 | `no-nicegui-in-the-backend` | same | 2, baselined | **0, enforced at zero** — `nicegui` is no longer a dependency |
-| Modules orphaned by the port | `python -m tools.refactor_audit.orphan_modules --check` | 0 | **1** (was 32) |
-| Controller operations with no caller | `pytest tests/refactor/test_controller_operations_have_callers.py` | 0 | **18** (was 47) |
+| Modules orphaned by the port | `python -m tools.refactor_audit.orphan_modules --check` | 0 | **0** (was 32) |
+| Controller operations with no caller | `pytest tests/refactor/test_controller_operations_have_callers.py` | 0 | **12** (was 47) |
 
 Update this block when a task lands. It is the pack's only honest progress metric.
 
@@ -35,7 +35,7 @@ Update this block when a task lands. It is the pack's only honest progress metri
 | 090 | Licence screens | no | done (2026-09-18) | Claude | Ported to plain server-rendered HTML; `nicegui` removed from the project |
 | 100 | The rest of the Trading tab | **YES** | done (2026-09-18) | Claude | Limit order, schedule, EA templates, pending-signal editor |
 | 110 | Node & updates | no | done (2026-09-18) | Claude | Pairing, autostart, restart, applying a release — a Settings tab, as it never was a top-level one |
-| 090 | Licence screens | no | not started | — | still NiceGUI; the reason `nicegui` is still a dependency |
+| 120 | Connections, Remote Node, and the trading-control handover | **YES** | **code complete, NOT signed off** | Claude | Four surfaces the port had dropped or mis-wired; see below. The handover is a money-path control and needs a demo session. |
 
 ## Coverage, after the port
 
@@ -47,7 +47,15 @@ moving the floors, and all three now sit **above** where they started:
 | `backend/src/controllers` | 79.3% | 79.3 | **100%** | 99.2 |
 | `backend/src/services/analytics` | 66.0% | 66.0 | **79.1%** | 79.1 |
 | `backend/src/services/cluster` | 86.9% | 86.9 | **96.0%** | 96.0 |
-| `backend/src/api` | — | — | **88.4%** | 88.4 (new) |
+| `backend/src/api` | — | — | **94.6%** | 94.6 (new) |
+| `backend/src/config` | 42.7% | 42.7 | **77.6%** | 77.6 |
+| `backend/src/services/risk` | 88.8% | 88.8 | **93.5%** | 93.5 |
+| `backend/src/services/engines` | — | — | **100%** | 100 (new) |
+
+Floors were raised for the six areas this work moved and left alone everywhere
+else. Several other areas now sit well above their floors; that slack is not
+this change's doing, and raising a floor somebody else earned is how a ratchet
+starts failing for reasons nobody can explain.
 
 `python -m tools.checks all` is green, 11 of 11.
 
@@ -112,3 +120,122 @@ password setting no session, and the referrer round-trip.
 attribution helpers and the theme presets were page-level code in tabs that are
 not ported. Task 080 must re-establish those behaviours and their tests when it
 ports the Analysis tab; they are not covered by anything today.
+
+---
+
+# Task 120 — what a second pass over the port found (2026-09-18)
+
+The port was reported complete. It was not, and the way it was not is worth
+recording: **every gap below was invisible to a green suite**, because the
+tests that should have caught them replaced the thing being tested with a
+recorder. A recorder accepts any signature, any key and any order.
+
+## The one that could have cost money
+
+**`PUT /api/node/active-trader` was a flag write.**
+
+Two paired nodes point at the same MT5 account, and `active_trader` decides
+which of them may open new positions. The NiceGUI header ran a handshake:
+remote → local asked the VPS to stand down and waited for its acknowledgement
+*before* starting this node's engines; local → remote stopped this node's
+engines *before* asking the VPS to resume. The React port kept the endpoint and
+dropped the sequence. Setting `local` therefore left the VPS believing it still
+owned the account while this node was marked active — two sets of engines, one
+balance, and nothing on either screen saying so.
+
+It also had no caller: no React control ever reached it. That is the only
+reason this is a near miss rather than an incident.
+
+Now: `services/cluster/handover.py` holds the sequence and its failure
+behaviour, ordered so that a peer which does not answer leaves the account with
+**no** active trader rather than two. `tests/services/cluster/test_handover.py`
+asserts the order through one shared list — a peer with its own call list can
+say "stand-down happened" and "the flag was set" but not which came first, and
+which came first is the entire property. Five mutations planted, four caught;
+the survivor is recorded in the test that should have caught it, because the
+guard it removed is genuinely redundant for the current engine set.
+
+The header now has the control back (`ActiveTraderControl`), with a
+confirmation that states the order before it happens and shows the backend's
+own note afterwards.
+
+**This has not been through a demo session.** Like task 060, its tests are
+green and that is not sign-off.
+
+## Settings > Connections wrote to columns that do not exist
+
+Three separate defects in one tab, all of which a recorder hid:
+
+* `recipient` was sent to `email_config`, whose column is `to_addr`. An
+  operator who typed an address got a 500 and no saved address.
+* The Telegram section offered `api_id`, `api_hash` and `phone` against
+  `telegram_config`, which has `bot_token_enc`, `chat_id` and `enabled`. Those
+  three are the **Telethon reader's** credentials and live in `config.yaml` —
+  a different store for a different thing. All three writes would have failed.
+* `PUT /api/settings/telegram` handed the whole request body to
+  `save_telegram_config(bot_token, chat_id, enabled)`. Every save raised.
+
+Also dropped: the provider picker, the schedule (daily/weekly/ORB), the Resend
+key, `from_addr`, `use_tls`, and all four **test-send buttons**. A settings form
+for an SMTP account with no way to send a test is a form that cannot be
+diagnosed, which is most of what it is for.
+
+`tests/api/test_settings_writes_reach_the_store.py` reads the tab's own field
+list and checks each name against the schema and the real save signatures, so
+the next one goes red in CI rather than at the keyboard.
+
+## Settings > Remote Node did not exist
+
+`frontend/pages/remote_node.py` (270 lines) was deleted with the rest and
+nothing replaced it. Unreachable from the dashboard since the port: starting
+and stopping the sync server, connecting out to a VPS, headless mode,
+centralized signal generation, and the one-off model-snapshot copy.
+
+Now `backend/src/api/routers/remote.py` + `RemoteTab`. A failed server start is
+recorded as **off**, because a stored "enabled" with no listener has the next
+restart claim the VPS is accepting connections when it is not.
+
+## A trading window that is not a time
+
+`PUT /api/schedule/schedule` stored whatever it was sent. The schedule is text,
+parsed when the engines ask whether they may trade, and `_find_active_block`
+swallows a parse failure — so a broken window never matches, the engines stop
+trading or keep trading past a stop, and nothing says why.
+
+Range matters as much as shape and was the part missing: `_parse_hm` is
+`int(h) * 60 + int(m)`, so `"25:00"` parses happily to 1500 minutes. The check
+went into `set_trading_schedule` rather than the router, because a paired node
+forwards its grid straight there.
+
+## Housekeeping done in the same pass
+
+* `services/engines/registry.py` — one table of which engines exist and their
+  bulk lifecycle. The handover had grown a second copy.
+* `api/redaction.py` — one copy of "never echo a credential", now that two
+  routers answer with stored configuration.
+* `notifications_controller` was the last `awaiting-react-port` orphan; wiring
+  the test sends cleared it. **That allowlist class is now empty.**
+* Controller operations with no caller: 18 → 12. Three were deleted rather than
+  re-wired (`parse_hm`, `start_stopped_engines`, `stop_running_engines`) — their
+  behaviour moved to services where it protects every caller, and a forwarder no
+  router calls is a route to nowhere.
+* `test_ui_shutdown_helper.py` asserted `nicegui imports <= 2` against a
+  contract enforced at zero — a test that could not fail. It asserts zero now.
+
+## What the remaining 12 are waiting for
+
+Six (`history_controller.ticket_*_map`) and `system_controller.local_today`
+belong to the Analysis deal-level trade table and its calendar. They are
+blocked on the same owner decision as that table, below, and are not dead.
+
+The other five are surfaces this pass did not reach:
+`sync_controller.is_remote_active`, `is_centralized_remote_mode` and
+`note_remote_setting` (remote-awareness on the engine panels and the signals
+card), `settings_controller.switch_environment_db` (the demo/live environment
+switcher that lived in the app shell) and `get_app_config_async`. Each is one
+question for whoever next touches that surface: wire it or delete it.
+
+## Mutation testing, this pass
+
+29 planted, 28 caught. The one survivor is the `_NOT_BULK_STARTED` guard, and
+it is recorded in `test_handover.py` with the reason it cannot fail today.
