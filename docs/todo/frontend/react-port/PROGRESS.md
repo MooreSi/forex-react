@@ -311,3 +311,78 @@ Nothing. The branch is level with `upstream/main` as of `0622ea7`.
 Each future catch-up is this same shape, and the cost is proportional to how
 many UI-reachability tests the upstream work brought with it — not to how many
 lines it changed.
+
+---
+
+# Task 140 — the Signal Generator was driving the wrong machine (2026-09-18)
+
+The same defect as the Local/Remote handover in task 120, one screen along, and
+found by the same question: *what does this control do when the other node is
+the one trading?*
+
+**When the remote node is the active trader, this machine's sub-engines are
+stood down.** Pressing Stop on the Signal Generator tab therefore stopped an
+engine that was not running, on a node that is not trading, while the peer's
+copy kept generating signals — and the screen said "stopped". The sync server's
+own `_handle_engine_control` names it exactly: those buttons *"would otherwise
+act on the Mac's own stood-down engine instance, which does nothing useful
+while looking like it worked."* The NiceGUI panels routed around it. The React
+port did not, so every control on that tab was local-only between 2026-09-18
+and this change.
+
+Three separate things had to be right, and each had cost a real evening before:
+
+1. **Where a control lands.** Not "am I in Remote mode": under centralized
+   signal generation the engines moved HERE, so the local ones are the live
+   ones even though the peer trades. `remote_stats_facade` already knew that
+   and `services/cluster/remote_control.py` defers to it rather than
+   re-deriving it.
+
+2. **What the panel shows.** In Remote mode the settings the engines obey are
+   the peer's, so they are overlaid on the local row — overlaid, not replacing
+   it, because the snapshot carries a handful of keys and a wholesale swap
+   would blank every setting the broadcast never sends.
+
+3. **Where "current" is read before a toggle inverts it.** From the local row
+   while writing to the peer, a toggle recomputes the same current on every
+   click and re-sends the same target state for ever. That is the live-confirmed
+   bug the old `note_remote_setting` existed to close: **Bounce stuck OFF,
+   Breakout stuck ON.**
+
+The tab now says which machine it is driving, in three states rather than two.
+"Centralized" is the one an operator would otherwise misread: the header says
+REMOTE and these engines are still the live ones.
+
+**A limit, stated rather than hidden.** The sync protocol carries exactly one
+risk setting between nodes — the AI-evaluation flag, which has its own
+endpoint. Every other tunable has no remote route, so in Remote mode saving one
+writes a row the trading node will not read. The banner says so.
+
+## Debt
+
+Controller operations with no caller: 12 → **9**. Three more were deleted
+rather than re-wired (`is_remote_active`, `is_centralized_remote_mode`,
+`note_remote_setting`): a browser cannot make the snapshot write, and the only
+code that knows a write went to the peer at all is the routing, so all three
+moved into the service with it.
+
+Of the 9 that remain, **seven are one feature**: the six `ticket_*_map`
+builders and `local_today` belong to the Analysis deal-level trade table and
+its calendar, both blocked on the facade decision below. The other two are the
+demo/live environment switcher that lived in the app shell.
+
+## Evidence
+
+```
+python -m tools.checks all   ->  11 of 11, green
+npm test                     ->  244 passed
+```
+
+16 mutations planted across the routing, the router and the banner; 16 caught.
+Floors raised for `backend/src/api` (94.6 → 94.7) and
+`backend/src/services/cluster` (96.5 → 97.1).
+
+**Not signed off.** Starting an engine lets it generate signals again, which is
+the same authority this panel has always had — but it now does so on a machine
+the operator is not sitting at. It belongs with the handover and task 060 in
+the demo session that is still owed.
