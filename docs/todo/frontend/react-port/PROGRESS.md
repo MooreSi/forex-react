@@ -33,6 +33,20 @@ Update this block when a task lands. It is the pack's only honest progress metri
 | 080 | The remaining eight tabs | mixed | not started | — | 8 tabs render an honest placeholder naming this task |
 | 090 | Licence screens | no | not started | — | still NiceGUI; the reason `nicegui` is still a dependency |
 
+## Coverage, after the port
+
+The three floors the port knocked down were restored by writing tests, not by
+moving the floors, and all three now sit **above** where they started:
+
+| Area | Before the port | Floor was | After | Floor now |
+|---|---|---|---|---|
+| `backend/src/controllers` | 79.3% | 79.3 | **100%** | 99.2 |
+| `backend/src/services/analytics` | 66.0% | 66.0 | **79.1%** | 79.1 |
+| `backend/src/services/cluster` | 86.9% | 86.9 | **96.0%** | 96.0 |
+| `backend/src/api` | — | — | **88.4%** | 88.4 (new) |
+
+`python -m tools.checks all` is green, 11 of 11.
+
 ## Sign-off owed
 
 **Task 060 is not done.** Its code is written and its tests are green, and

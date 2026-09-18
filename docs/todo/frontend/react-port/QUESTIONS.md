@@ -101,15 +101,32 @@ modules and 17 were caught; the one that survived is recorded in the test that
 should have caught it, because the condition it removed turns out to be
 redundant.
 
-**`backend/src/controllers` is a different problem and is left red.** Its 226
-uncovered statements are thin forwarders — `def x(): from ... import y; return
-y(...)` — belonging to the eight tabs that are not ported. There is no
-behaviour there to test that is not already tested in the service behind it, so
-the only way to move the number is a sweep that calls each forwarder and asserts
-it forwarded. That is defensible (forwarding unchanged IS a controller's whole
-contract, and a sweep would catch one that reshaped an argument) but it is a
-different piece of work from this one, and it is worth doing deliberately rather
-than as a side effect of chasing a number. **Say the word and it gets written;
-otherwise it comes back for free as task 080 ports the tabs and gives those
-forwarders their routers.**
+**`backend/src/controllers` followed, on the owner's instruction (2026-09-18):
+69.1% → 100%, floor raised to 99.2.**
+
+`tests/controllers/test_controller_forwarding.py` sweeps the 213 operations
+whose entire specification is "pass this through unchanged", and
+`test_controller_behaviour.py` covers the 38 that do something else. The sweep
+is not a coverage device: for each operation it captures the real service
+function, replaces it with a recorder, calls the controller with one distinct
+sentinel per parameter, and then **binds both calls against their real
+signatures** so it can assert the value that went in as `source` arrived as the
+service's `source`. Position alone would reject a legitimate
+`kill_pid(pid, force=force)`; identity alone lets a swapped pair through — and
+did, until the binding check went in.
+
+Six mutations were planted against it and all six caught: two arguments
+swapped, an argument dropped, the return swallowed, the result reshaped, the
+call made twice, and the call pointed at a different service function. Twelve
+more were planted against the behavioural file and all twelve caught.
+
+The sweep also found a real bug on its first run, which is the answer to
+whether it was worth writing: **`news_controller.save_config` forwarded to
+`_config.save_config`, which does not exist.** `backend.src.config` offers
+`save_to_yaml`. Any caller would have taken an `AttributeError`; it never had
+one, because the News page wrote its blackout settings through
+`settings_controller.save_config`, which works. It was a broken duplicate of an
+operation the layer already had, and it is deleted.
+
+All eleven checks in `python -m tools.checks all` now pass.
 
