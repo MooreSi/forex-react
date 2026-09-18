@@ -467,3 +467,103 @@ import `backend.src.db` first, which means the repo is one import-line reorder
 away from a boot failure with no gate watching. Raised as its own task rather
 than folded in here — it is an import-order fix plus a new gate, and it touches
 the data layer.
+
+---
+
+# Task 160 — the discrepancy audit (2026-09-18)
+
+The owner loaded the app and found features missing and settings moved. This is
+what a key-by-key comparison against the NiceGUI source turned up, and what was
+done about each.
+
+**Method.** Every `app_config` and risk-settings key the old pages *wrote* was
+extracted from the deleted source and searched for across `frontend/src` and
+`backend/src/api`. A key the operator could change before and cannot now is a
+missing control. 52 keys were written by the old UI; **27 had no route at all.**
+
+## Gone, and restored
+
+| What | Was | Consequence while it was missing |
+|---|---|---|
+| **Pause trading** | header dialog | **No way to halt trading from the dashboard.** Sources had to be disabled one at a time, or the database edited. |
+| **Live-execution gates** (`accept_tg_signals`, `bo_live_execution`, `re_live_execution`) | top of Parsing | No way to stop an engine executing. Same answer: edit the database. |
+| **Settings > AI** | its own tab | **No way to enter an API key.** Every AI feature — the Analysis tab, commentary, strategy recommendations, the reversal tuner — unreachable on a fresh install. |
+| **Settings > Security** | its own tab | The password-on-restart setting could not be changed. |
+| **Settings > Registration** | its own tab | Licence holder, expiry and machine ID not visible anywhere. |
+| **18 of 22 risk settings** | Settings > Risk | No give-back guard, circuit breaker, exposure cap, toxic-hour skip, trend gate, fill-delay filter or profit-close from any screen. |
+
+## Moved, not lost
+
+Worth stating plainly, because "missing" and "somewhere else" feel the same
+when you are looking for something:
+
+* **Email** and **Telegram Alerts** → one **Connections** tab.
+* **Update** → **Node & updates**.
+* **Remote Node** → **Remote node** (restored in task 120; it was genuinely
+  missing before that).
+* **Risk** was on the *Trading* page in NiceGUI and is now under Settings.
+* **Theme** is not coming back: dark-only is a recorded decision (QUESTIONS.md
+  Q3), and every colour goes through a token so it stays a decision.
+
+## Bugs the restoration found
+
+**Resuming did not re-arm.** Three surfaces wrote `trade_pause_until` by hand —
+`/pause`, the Telegram panel and the dashboard — and only two of them called
+`rearm_risk_guards()`. Both post-close guards halt for the rest of the broker
+day, so resuming from the dashboard after a give-back halt lasted until the
+next close: the button looked broken and the reason was invisible. All three
+now go through `services/risk/manual_pause.py`.
+
+**Two of the Risk tab's four fields wrote columns that do not exist.**
+`risk_pct` is a column on a different table and `daily_loss_limit_pct` is a
+column nowhere at all, so both raised on save while the box kept showing what
+was typed. The real names are `risk_per_trade_pct` and `max_daily_loss_pct`.
+
+**Autostart turned itself off at every restart.** `app.py` reconciles the OS
+scheduler to `auto_restart_enabled` on boot, and the React toggle installed the
+entry without writing that key — so the watchdog was removed at the next start
+and the toggle still read ON. The write moved into `core_autostart.enable/
+disable`, where every caller gets it.
+
+## The gate
+
+`tests/api/test_settings_writes_reach_the_store.py` now reads **every** screen's
+field list and checks each key against the real schema and the real save
+signatures. That is the check that turns this class of bug from "found by the
+owner opening the app" into "found by CI":
+
+* the Connections tab (email + Telegram),
+* the Risk tab,
+* the Signal Generator's capability switches,
+* the parsing switches,
+* the live-execution gates.
+
+## Still open from the audit
+
+Small, and none of them silently wrong — each is simply a control that has no
+screen yet:
+
+* `bridge_backend` / `mt5_bridge_url` / `wine_bin` / `mt5_bottle_path` — the
+  macOS bridge backend picker (CrossOver vs an independent Wine prefix).
+* `orb_auto_execute_enabled` / `orb_lot_size` — auto-executing the opening-range
+  breakout.
+* `news_blackout_impact` — which impact level the news blackout applies to.
+* `re_ai_tuning_enabled` — the reversal AI tuner's own switch.
+* `ea_bridge_enabled` — the EA bridge toggle on the MT5 tab.
+* `account_env` — the demo/live switch. **Deliberately not built.** Its whole
+  purpose is pointing the app at a real-money account, which is on CLAUDE.md's
+  stop-and-ask list. Its absence is safe; a half-built version would not be.
+
+## Evidence
+
+```
+python -m tools.checks all   ->  11 of 11, green   (8,620 tests)
+npm test                     ->  285 passed
+```
+
+15 mutations planted across the pause service, the risk spec and the gates; 15
+caught.
+
+**Not signed off.** The live-execution gates and the pause decide whether money
+moves. Their tests are green and that is not sign-off — they join the demo
+session already owed for task 060, the handover and the engine controls.
