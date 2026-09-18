@@ -239,3 +239,75 @@ question for whoever next touches that surface: wire it or delete it.
 
 29 planted, 28 caught. The one survivor is the `_NOT_BULK_STARTED` guard, and
 it is recorded in `test_handover.py` with the reason it cannot fail today.
+
+---
+
+# Task 130 — catching up with `MooreSi/forex` (2026-09-18)
+
+Six commits landed upstream after this branch's clone point (`1d594cb`..
+`0622ea7`, 2026-09-16 to 2026-09-18): the signal decision log, the lot ceiling,
+CME futures context, instant-entry reporting, and two backfill fixes. About
+5,600 lines.
+
+**The merge itself was nearly clean.** Five conflicts, four of them NiceGUI
+files this branch had deleted and which stay deleted; one real content conflict
+in `telegram_controller.__all__`, where both sides had added an export. Out of
+8,463 tests, four failed and one file would not collect — all five for the same
+reason: an upstream test reads a NiceGUI page that no longer exists.
+
+That is the port's recurring shape and it is worth naming. Upstream writes
+"the switch is reachable" tests that read the page source, which is exactly
+right — `docs/todo/refactor` records a guardrail that scanned a deleted
+directory and printed "all good" for months. Every one of those tests needs its
+subject re-pointed at the React tab, and the assertions themselves carry over
+unchanged.
+
+## What was ported
+
+**CME futures context switch** → the Signal Generator tab's capability list.
+The wording is the feature: there is no CME feed in this build, and turning the
+switch on records an intent and changes nothing the engine decides. An owner
+who turned it on, saw no change and concluded the engine was broken would be
+the failure; believing a later decision was informed by CME data would be
+worse. `test_cme_context_switch.py` reads that text and fails if it stops
+admitting it.
+
+**Signal Decision Log** → a new sub-tab on Parsing, plus
+`api/routers/decision_log.py`. Two readouts, because they become useful at
+different times: the summary is worth reading from the first decision, and
+champion-vs-challenger needs closed trades so it says nothing for days. Neither
+polls — this sits behind a live trading page, and a card that queries a
+database every few seconds for a number that moves twice a day is a cost with
+no benefit. The recording toggle is a 13th parsing switch under a new RESEARCH
+badge, default off.
+
+## The one thing this found
+
+`test_the_card_admits_it_is_not_connected` reads forward from the FIRST
+occurrence of the key in the file. The comment I wrote above the capability
+quoted both phrases the test looks for, so the assertion passed on my own
+comment and the description underneath could have said anything. Two planted
+mutations survived, which is how it was caught; the comment no longer repeats
+them and both mutations now fail.
+
+That is the same class as everything in task 120: a test that cannot fail is
+worse than no test, because it reports a guarantee it is not providing.
+
+## Evidence
+
+```
+python -m tools.checks all   ->  11 of 11, green   (8,463 tests)
+npm test                     ->  239 passed
+```
+
+10 mutations planted against the ported surfaces; 10 caught, after the two that
+survived were made to fail.
+
+## Not merged
+
+Nothing. The branch is level with `upstream/main` as of `0622ea7`.
+
+**`MooreSi/forex` is still untouched by this work** and is free to keep moving.
+Each future catch-up is this same shape, and the cost is proportional to how
+many UI-reachability tests the upstream work brought with it — not to how many
+lines it changed.
