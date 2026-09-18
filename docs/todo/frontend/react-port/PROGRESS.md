@@ -567,3 +567,93 @@ caught.
 **Not signed off.** The live-execution gates and the pause decide whether money
 moves. Their tests are green and that is not sign-off — they join the demo
 session already owed for task 060, the handover and the engine controls.
+
+---
+
+# Task 170 — the demo/live switch, and what building it uncovered (2026-09-18)
+
+Built on the owner's explicit instruction, having been flagged twice as theirs
+to decide. It is the control that decides whether the account this app trades
+holds real money.
+
+## The switch
+
+`services/broker/environment.py`. Four things happen together or the app is
+half-switched — reading one account's history while sending orders to the
+other, with neither screen saying so:
+
+1. the target account's credentials are written to `bridge_credentials.json`;
+2. the shared database connection is re-pointed at that environment's file;
+3. `account_env` is persisted;
+4. the app restarts, so every cached handle is rebuilt against the new account.
+
+**The order is the safety property.** Nothing is written until the target's
+credentials have been checked, and the credentials file goes first because it
+is the step that can still fail for reasons the check cannot see.
+
+**Restart rather than an in-place bridge reconnect.** The NiceGUI version told
+the running bridge to change account, with a long tail of handling for a
+reconnect that half-worked, an older bridge build, or autotrading that would
+not re-enable. A restart is atomic and needs nothing past the runtime facade —
+so the facade allowlist did not have to grow after all. The in-place version
+can be added later if those seconds matter; it would need `send_credentials`,
+`reconnect` and `enable_autotrading` on the facade, which is a baseline change.
+
+**Live asks twice, and the second ask names the account.** Nothing else in this
+API requires a confirmation. "Are you sure?" is a question people learn to
+click through; "switch to 900123 on Vantage-Live?" is one they read. Switching
+back to demo is the safe direction and does not ask the same way — dressing it
+up identically would train the habit the guard exists to prevent.
+
+## What building it uncovered
+
+**MT5 credentials could not be saved at all.** The router called
+`save_mt5_credentials(login, password, server)` — three positional arguments to
+a function that takes one dict — so every save raised. And the password column
+is `password_enc`, which is also what the repo encrypts on the way in, so a
+value written as `password` would have missed both. Same defect class as the
+Telegram write, in the one place that decides which broker account the bridge
+logs into.
+
+**The live account had no fields anywhere.** The MT5 tab offered only the demo
+credentials, which meant the demo/live switch could never have been used even
+once it existed: it refuses to switch to an account it has no credentials for.
+
+**The news blackout's impact level could not be changed.** It was in the
+response schema and in the browser's types from the start and was never written
+or rendered — the same shape as the 2026-09-04 bug that endpoint's docstring is
+already about, one key along.
+
+## Also restored in this pass
+
+* `ea_bridge_enabled` — the EA bridge switch, on the MT5 tab.
+* `bridge_backend` / `mt5_bridge_url` — how the bridge runs on macOS.
+* `re_ai_tuning_enabled` — the switch that lets the AI re-tune the reversal
+  settings every fifteen minutes. Its description says so plainly, because a
+  switch that changes other switches is one an operator needs to expect.
+
+## Debt
+
+Controller operations with no caller: 9 → **7**, and all seven are now one
+feature — the Analysis deal-level trade table and its calendar, still blocked on
+the facade decision. `switch_environment_db` and `get_app_config_async` were
+deleted: the first is the middle of the four steps above and offering it alone
+is how an app half-switches; the second had no caller at all.
+
+`settings_controller` went over its 200-line ceiling and the environment
+operations moved into `environment_controller.py`, which is what that ceiling is
+for.
+
+## Evidence
+
+```
+python -m tools.checks all   ->  11 of 11, green   (8,662 tests)
+npm test                     ->  307 passed
+```
+
+10 mutations planted against the switch and its guards; 10 caught.
+
+**The switch itself has never been exercised.** Its tests are green, no test
+has ever switched anything, and nothing here has touched a broker. Pointing
+this app at a live account for the first time is the owner's to do, with the
+demo session that is already owed.
