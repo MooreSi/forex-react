@@ -56,9 +56,9 @@ Named rather than left to be discovered:
 
 | Surface | Where it was | Why it is not here |
 |---|---|---|
-| Trading: manual **limit** order, EA templates, schedule, strategy cards, pending-signal editor | `frontend/pages/trading/` | The Trading tab was ported in the foundation pass with Positions, Signals and the market order. The rest is task **100**. `schedule_controller` and four `trading_controller` operations are still recorded as awaiting a caller. |
+| ~~Trading: limit order, EA templates, schedule, pending-signal editor~~ | `frontend/pages/trading/` | **Done** (task 100). Strategy cards were folded into the channel-strategy recommendations rather than rebuilt as cards. |
 | Analysis: the closed-trade table | `frontend/pages/history/_trade_table.py` | Needs deal history through a controller. See above. |
-| Remote node page, Update panel | `pages/remote_node.py`, `pages/update_panel.py` | Never tabs. `remote_controller`, `remote_node_controller` and `system_controller`'s autostart operations are still awaiting callers. |
+| ~~Remote node page, Update panel~~ | `pages/remote_node.py`, `pages/update_panel.py` | **Done** (task 110), as Settings → Node & updates. They were never top-level tabs and are not one now. |
 | Email ORB report attachment | `pages/settings/_email.py` | `notifications_controller.ORB_CHART_CID` is still awaiting a caller; the report itself is wired. |
 
 `AWAITING_REACT_PORT` in `tests/refactor/test_controller_operations_have_callers.py`
@@ -69,7 +69,7 @@ went from **47 to 31** and names every one of these. The orphan allowlist lost
 
 | Behaviour | Tab | What the new test must prove |
 |---|---|---|
-| Editing one pending signal must not write another row's values | Trading (pending signals editor) — **still open**, task 100 | Render several rows, edit one, assert the others are untouched. The NiceGUI version was a loop-closure capture bug; React's version is a handler reading state from an earlier render. Was `tests/refactor/test_late_binding.py::TestThePendingSignalsEditorSpecifically`. |
+| Editing one pending signal must not write another row's values | Trading — **done**: the id is in the URL, the dialog is keyed on it, and `TradingPanel.test.tsx` proves a second Edit does not carry the first row's draft | Render several rows, edit one, assert the others are untouched. The NiceGUI version was a loop-closure capture bug; React's version is a handler reading state from an earlier render. Was `tests/refactor/test_late_binding.py::TestThePendingSignalsEditorSpecifically`. |
 | History deal attribution — which session and which comment a deal belongs to | Analysis — **still open**; needs the deal table, which needs a controller function | Was `tests/ui/test_history_session_attribution.py` and `test_history_comment_attribution.py`. The helpers lived in the page; when the tab is ported they belong in `history_controller` or a service, with the tests moving to match. |
 | The four theme presets re-skin only the neutral scale | any — **still open**; there is one theme today | Was `tests/core/test_ui_theme.py`. The React equivalent is the token set in `frontend/src/index.css`: a test that a preset changes `surface-*`/`ink-*` and leaves `profit`, `loss`, `warning` and `remote` alone. |
 | The HTF-bias Asian exemption switch is reachable | Signal Generator — **now due**: the tab is marked ported, so the guard is live | Already guarded: `tests/risk/test_htf_bias_gate_asian_exemption.py::TestTheSwitchIsReachable` goes red the moment the tab is marked ported without the switch. |

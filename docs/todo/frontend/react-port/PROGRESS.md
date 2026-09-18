@@ -14,9 +14,9 @@ that is not is the exact failure this repo's rules exist to prevent.
 | NiceGUI Python lines under `frontend/` | `find frontend -name '*.py' -not -path '*/node_modules/*' \| xargs wc -l` | 21,434 | **0** |
 | Tabs served by React | — | 0 / 10 | **10 / 10** |
 | Top-layer import contracts | `python -m tools.refactor_audit.import_contracts --check` | 2, at zero, scanning `frontend/` | 2, at zero, scanning `backend/src/api/` |
-| `no-nicegui-in-the-backend` | same | 2, baselined | 2, baselined — the licence screens, task 090 |
-| Modules orphaned by the port | `python -m tools.refactor_audit.orphan_modules --check` | 0 | **4** (was 32; 26 regained callers when the tabs landed) |
-| Controller operations with no caller | `pytest tests/refactor/test_controller_operations_have_callers.py` | 0 | **31** (was 47) |
+| `no-nicegui-in-the-backend` | same | 2, baselined | **0, enforced at zero** — `nicegui` is no longer a dependency |
+| Modules orphaned by the port | `python -m tools.refactor_audit.orphan_modules --check` | 0 | **1** (was 32) |
+| Controller operations with no caller | `pytest tests/refactor/test_controller_operations_have_callers.py` | 0 | **18** (was 47) |
 
 Update this block when a task lands. It is the pack's only honest progress metric.
 
@@ -32,7 +32,9 @@ Update this block when a task lands. It is the pack's only honest progress metri
 | 060 | Trading tab | **YES** | **code complete, NOT signed off** | Claude | Positions with close, signals list, manual market order with a two-step confirmation. **No demo session has been run. The order and close paths have never executed against a broker through this UI.** See "Sign-off owed" below. |
 | 070 | Remove NiceGUI | no | done (2026-09-18) | Claude | 21,434 lines and 57 test files deleted. Three tests kept and relocated; 32 backend modules allowlisted as orphaned-by-the-port. |
 | 080 | The remaining eight tabs | mixed | done (2026-09-18) | Claude | All ten tabs are React. Three are narrower than their originals for boundary reasons, named in the task file. |
-| 100 | The rest of the Trading tab | **YES** | not started | — | manual limit order, EA templates, schedule, strategy cards, pending-signal editor |
+| 090 | Licence screens | no | done (2026-09-18) | Claude | Ported to plain server-rendered HTML; `nicegui` removed from the project |
+| 100 | The rest of the Trading tab | **YES** | done (2026-09-18) | Claude | Limit order, schedule, EA templates, pending-signal editor |
+| 110 | Node & updates | no | done (2026-09-18) | Claude | Pairing, autostart, restart, applying a release — a Settings tab, as it never was a top-level one |
 | 090 | Licence screens | no | not started | — | still NiceGUI; the reason `nicegui` is still a dependency |
 
 ## Coverage, after the port
@@ -49,17 +51,32 @@ moving the floors, and all three now sit **above** where they started:
 
 `python -m tools.checks all` is green, 11 of 11.
 
-## What the ported tabs do NOT include
+## The one thing still missing, and why it needs you
 
-Stated here so it is not discovered later:
+**Analysis has no deal-level trade table.** Everything else is ported.
 
-- **Trading** still has only Positions, Signals and the market order. Manual
-  limit orders, EA templates, the schedule, strategy cards and the
-  pending-signal editor are task 100.
-- **Analysis** has no deal-level trade table. It needs `get_deal_history`
-  through a controller, which does not exist — the NiceGUI page reached
-  `engine._bridge` directly, which this layer may not do.
-- **Remote node** and **Update panel** were never tabs and are not ported.
+The NiceGUI page built that table from `bridge.get_deal_history()`, reached
+through `engine._bridge` — past the controller boundary, which the React layer
+may not do. There are exactly three ways to give it a legal route, and all
+three are decisions rather than details:
+
+1. **Add `get_deal_history` to `TradingRuntime`.** This is the natural home
+   (`compute_mt5_performance` already works this way) and it is blocked by the
+   facade gate, whose rule is one-way by design: *"its public surface is
+   exactly the curated facade allowlist — names may be removed from the
+   allowlist, never added."* Adding one is a baseline change, and CLAUDE.md
+   says to stop and ask.
+2. **A service function taking the engine**, like `engine_reads.open_trades`.
+   It would have to read `engine._bridge`, and
+   `test_no_production_code_reaches_into_a_runtime_private` derives its leak
+   set from the runtime's own members, so it would fail the day it landed.
+3. **Live without it.** The tab already reports the account's headline numbers,
+   the hourly P&L grid, the channel scorecard and ladder reach — all from the
+   local database. The trade table is the per-deal detail on top.
+
+Option 1 is one line plus an allowlist entry and is what I would do. It needs
+your word, because "a ratchet baseline would have to rise" is on the stop-and-ask
+list.
 
 ## Sign-off owed
 
