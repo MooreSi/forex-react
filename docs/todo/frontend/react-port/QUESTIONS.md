@@ -81,4 +81,35 @@ Three honest ways out, and this one is yours:
 3. **Record a dated one-time adjustment**, with the port named as the reason, and let the floors
    climb back as tabs land. Honest if it is written down; a quiet `--update-baseline` is not.
 
-**Answer:**
+**Answer (2026-09-18): option 2 — write the tests.**
+
+Done for two of the three areas, and the floors were **raised** to lock the gain
+in rather than left where they were:
+
+| Area | Was | Floor was | Now | Floor now |
+|---|---|---|---|---|
+| `backend/src/services/analytics` | 57.8% | 66.0 | **79.1%** | 79.1 |
+| `backend/src/services/cluster` | 84.7% | 86.9 | **96.0%** | 96.0 |
+| `backend/src/controllers` | 69.1% | 79.3 | 69.1% | 79.3 — **still red** |
+
+`tests/services/analytics/` (87 tests) and `tests/services/cluster/` (23) are
+new. They are behaviour tests, not a coverage sweep: phantom-TP detection, the
+R:R and entry-drift maths, the simulated 50%-at-TP1 model, the DPM/fixed split,
+the ladder-leg joins, comment-based attribution, the centralized-signal-gen gate
+and the encrypted pairing token. 18 mutations were planted across the four
+modules and 17 were caught; the one that survived is recorded in the test that
+should have caught it, because the condition it removed turns out to be
+redundant.
+
+**`backend/src/controllers` is a different problem and is left red.** Its 226
+uncovered statements are thin forwarders — `def x(): from ... import y; return
+y(...)` — belonging to the eight tabs that are not ported. There is no
+behaviour there to test that is not already tested in the service behind it, so
+the only way to move the number is a sweep that calls each forwarder and asserts
+it forwarded. That is defensible (forwarding unchanged IS a controller's whole
+contract, and a sweep would catch one that reshaped an argument) but it is a
+different piece of work from this one, and it is worth doing deliberately rather
+than as a side effect of chasing a number. **Say the word and it gets written;
+otherwise it comes back for free as task 080 ports the tabs and gives those
+forwarders their routers.**
+
