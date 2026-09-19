@@ -1,0 +1,833 @@
+# React port — PROGRESS
+
+**Shared status log.** Claim a row (name + date under Owner) before starting it, flip its
+Status as you go, leave a one-line Note — commit, blocker or decision. A task reported Done
+that is not is the exact failure this repo's rules exist to prevent.
+
+## Status key
+`not started` · `in progress` · `blocked` (say why) · `done` (date + commit)
+
+## The numbers this pack moves
+
+| Metric | Command | At start (2026-09-18) | Now (2026-09-18) |
+|---|---|---|---|
+| NiceGUI Python lines under `frontend/` | `find frontend -name '*.py' -not -path '*/node_modules/*' \| xargs wc -l` | 21,434 | **0** |
+| Tabs served by React | — | 0 / 10 | **10 / 10** |
+| Top-layer import contracts | `python -m tools.refactor_audit.import_contracts --check` | 2, at zero, scanning `frontend/` | 2, at zero, scanning `backend/src/api/` |
+| `no-nicegui-in-the-backend` | same | 2, baselined | **0, enforced at zero** — `nicegui` is no longer a dependency |
+| Modules orphaned by the port | `python -m tools.refactor_audit.orphan_modules --check` | 0 | **0** (was 32) |
+| Controller operations with no caller | `pytest tests/refactor/test_controller_operations_have_callers.py` | 0 | **12** (was 47) |
+
+Update this block when a task lands. It is the pack's only honest progress metric.
+
+## Tasks
+
+| # | Task | Money | Status | Owner | Notes |
+|---|---|---|---|---|---|
+| 010 | API layer and contracts | no | done (2026-09-18) | Claude | `backend/src/api/` with routers for system, auth, chart, trading, orders. Both top-layer contracts retargeted from `frontend` to `backend/src/api` and renamed; `server.py` is the single exemption. `tests/api/` — 75 tests. |
+| 020 | Auth and the login gate | no | done (2026-09-18) | Claude | Signed-cookie session over the same per-install secret. 401 JSON for API paths, redirect for page paths. Default-off auto-login, unreadable-config-stays-shut and first-run-setup all pinned. |
+| 030 | React build and serving | no | done (2026-09-18) | Claude | Vite + React 19 + TS + Tailwind 4. `run.py` calls `uvicorn.Server` instead of `ui.run`. SPA fallback is middleware, not a catch-all — see the note in the domain README. |
+| 040 | App shell | no | done (2026-09-18) | Claude | Header, ten tabs in the documented order, Chart default, one shared poll, colour tokens, `NotPortedPanel` for the other eight. |
+| 050 | Chart tab | no | done (2026-09-18) | Claude | Candles, EMA 9/21/50, RSI, FVG zones, bid/ask lines, open-position markers and a trades panel. lightweight-charts. |
+| 060 | Trading tab | **YES** | **code complete, NOT signed off** | Claude | Positions with close, signals list, manual market order with a two-step confirmation. **No demo session has been run. The order and close paths have never executed against a broker through this UI.** See "Sign-off owed" below. |
+| 070 | Remove NiceGUI | no | done (2026-09-18) | Claude | 21,434 lines and 57 test files deleted. Three tests kept and relocated; 32 backend modules allowlisted as orphaned-by-the-port. |
+| 080 | The remaining eight tabs | mixed | done (2026-09-18) | Claude | All ten tabs are React. Three are narrower than their originals for boundary reasons, named in the task file. |
+| 090 | Licence screens | no | done (2026-09-18) | Claude | Ported to plain server-rendered HTML; `nicegui` removed from the project |
+| 100 | The rest of the Trading tab | **YES** | done (2026-09-18) | Claude | Limit order, schedule, EA templates, pending-signal editor |
+| 110 | Node & updates | no | done (2026-09-18) | Claude | Pairing, autostart, restart, applying a release — a Settings tab, as it never was a top-level one |
+| 120 | Connections, Remote Node, and the trading-control handover | **YES** | **code complete, NOT signed off** | Claude | Four surfaces the port had dropped or mis-wired; see below. The handover is a money-path control and needs a demo session. |
+
+## Coverage, after the port
+
+The three floors the port knocked down were restored by writing tests, not by
+moving the floors, and all three now sit **above** where they started:
+
+| Area | Before the port | Floor was | After | Floor now |
+|---|---|---|---|---|
+| `backend/src/controllers` | 79.3% | 79.3 | **100%** | 99.2 |
+| `backend/src/services/analytics` | 66.0% | 66.0 | **79.1%** | 79.1 |
+| `backend/src/services/cluster` | 86.9% | 86.9 | **96.0%** | 96.0 |
+| `backend/src/api` | — | — | **94.6%** | 94.6 (new) |
+| `backend/src/config` | 42.7% | 42.7 | **77.6%** | 77.6 |
+| `backend/src/services/risk` | 88.8% | 88.8 | **93.5%** | 93.5 |
+| `backend/src/services/engines` | — | — | **100%** | 100 (new) |
+
+Floors were raised for the six areas this work moved and left alone everywhere
+else. Several other areas now sit well above their floors; that slack is not
+this change's doing, and raising a floor somebody else earned is how a ratchet
+starts failing for reasons nobody can explain.
+
+`python -m tools.checks all` is green, 11 of 11.
+
+## The one thing still missing, and why it needs you
+
+**Analysis has no deal-level trade table.** Everything else is ported.
+
+The NiceGUI page built that table from `bridge.get_deal_history()`, reached
+through `engine._bridge` — past the controller boundary, which the React layer
+may not do. There are exactly three ways to give it a legal route, and all
+three are decisions rather than details:
+
+1. **Add `get_deal_history` to `TradingRuntime`.** This is the natural home
+   (`compute_mt5_performance` already works this way) and it is blocked by the
+   facade gate, whose rule is one-way by design: *"its public surface is
+   exactly the curated facade allowlist — names may be removed from the
+   allowlist, never added."* Adding one is a baseline change, and CLAUDE.md
+   says to stop and ask.
+2. **A service function taking the engine**, like `engine_reads.open_trades`.
+   It would have to read `engine._bridge`, and
+   `test_no_production_code_reaches_into_a_runtime_private` derives its leak
+   set from the runtime's own members, so it would fail the day it landed.
+3. **Live without it.** The tab already reports the account's headline numbers,
+   the hourly P&L grid, the channel scorecard and ladder reach — all from the
+   local database. The trade table is the per-deal detail on top.
+
+Option 1 is one line plus an allowlist entry and is what I would do. It needs
+your word, because "a ratchet baseline would have to rise" is on the stop-and-ask
+list.
+
+## Sign-off owed
+
+**Task 060 is not done.** Its code is written and its tests are green, and
+neither of those is sign-off for a money path. What is missing is a demo
+session: the owner watching a trade open and close **through the React UI**,
+against the demo account, with the result recorded in this file. Until that
+happens, treat the Trading tab's Market order and Close controls as unproven —
+every test behind them uses a sentinel engine that records calls and returns a
+canned dict, which proves the arguments are forwarded unchanged and proves
+nothing about what a broker does with them.
+
+## Deleted tests, and their replacements
+
+`tests/frontend/` (54 files), `tests/ui/test_history_comment_attribution.py`,
+`tests/ui/test_history_session_attribution.py` and
+`tests/core/test_ui_theme.py` were deleted in the same change as their subject.
+Three were kept because they are repo-wide rules that merely lived in a
+frontend directory:
+
+| Was | Now |
+|---|---|
+| `tests/frontend/test_server_bind.py` | `tests/api/test_server_bind.py` — unchanged; it was always about `run.py` |
+| `tests/frontend/test_no_silent_excepts.py` | `tests/api/test_no_silent_excepts.py` — retargeted from `frontend/` to `backend/src/api/`, with a new fail-closed test so it cannot scan an empty tree |
+| `tests/frontend/test_install_guide_matches_the_code.py` | `tests/refactor/test_install_guide_matches_the_code.py` — unchanged |
+
+The behaviours the deleted login-gate tests pinned have named twins in
+`tests/api/test_auth_gate.py`: default-off auto-login, unreadable config
+staying shut, first-run setup instead of an impossible login form, a wrong
+password setting no session, and the referrer round-trip.
+
+**The rest have no twin yet, and that is the honest position.** The history
+attribution helpers and the theme presets were page-level code in tabs that are
+not ported. Task 080 must re-establish those behaviours and their tests when it
+ports the Analysis tab; they are not covered by anything today.
+
+---
+
+# Task 120 — what a second pass over the port found (2026-09-18)
+
+The port was reported complete. It was not, and the way it was not is worth
+recording: **every gap below was invisible to a green suite**, because the
+tests that should have caught them replaced the thing being tested with a
+recorder. A recorder accepts any signature, any key and any order.
+
+## The one that could have cost money
+
+**`PUT /api/node/active-trader` was a flag write.**
+
+Two paired nodes point at the same MT5 account, and `active_trader` decides
+which of them may open new positions. The NiceGUI header ran a handshake:
+remote → local asked the VPS to stand down and waited for its acknowledgement
+*before* starting this node's engines; local → remote stopped this node's
+engines *before* asking the VPS to resume. The React port kept the endpoint and
+dropped the sequence. Setting `local` therefore left the VPS believing it still
+owned the account while this node was marked active — two sets of engines, one
+balance, and nothing on either screen saying so.
+
+It also had no caller: no React control ever reached it. That is the only
+reason this is a near miss rather than an incident.
+
+Now: `services/cluster/handover.py` holds the sequence and its failure
+behaviour, ordered so that a peer which does not answer leaves the account with
+**no** active trader rather than two. `tests/services/cluster/test_handover.py`
+asserts the order through one shared list — a peer with its own call list can
+say "stand-down happened" and "the flag was set" but not which came first, and
+which came first is the entire property. Five mutations planted, four caught;
+the survivor is recorded in the test that should have caught it, because the
+guard it removed is genuinely redundant for the current engine set.
+
+The header now has the control back (`ActiveTraderControl`), with a
+confirmation that states the order before it happens and shows the backend's
+own note afterwards.
+
+**This has not been through a demo session.** Like task 060, its tests are
+green and that is not sign-off.
+
+## Settings > Connections wrote to columns that do not exist
+
+Three separate defects in one tab, all of which a recorder hid:
+
+* `recipient` was sent to `email_config`, whose column is `to_addr`. An
+  operator who typed an address got a 500 and no saved address.
+* The Telegram section offered `api_id`, `api_hash` and `phone` against
+  `telegram_config`, which has `bot_token_enc`, `chat_id` and `enabled`. Those
+  three are the **Telethon reader's** credentials and live in `config.yaml` —
+  a different store for a different thing. All three writes would have failed.
+* `PUT /api/settings/telegram` handed the whole request body to
+  `save_telegram_config(bot_token, chat_id, enabled)`. Every save raised.
+
+Also dropped: the provider picker, the schedule (daily/weekly/ORB), the Resend
+key, `from_addr`, `use_tls`, and all four **test-send buttons**. A settings form
+for an SMTP account with no way to send a test is a form that cannot be
+diagnosed, which is most of what it is for.
+
+`tests/api/test_settings_writes_reach_the_store.py` reads the tab's own field
+list and checks each name against the schema and the real save signatures, so
+the next one goes red in CI rather than at the keyboard.
+
+## Settings > Remote Node did not exist
+
+`frontend/pages/remote_node.py` (270 lines) was deleted with the rest and
+nothing replaced it. Unreachable from the dashboard since the port: starting
+and stopping the sync server, connecting out to a VPS, headless mode,
+centralized signal generation, and the one-off model-snapshot copy.
+
+Now `backend/src/api/routers/remote.py` + `RemoteTab`. A failed server start is
+recorded as **off**, because a stored "enabled" with no listener has the next
+restart claim the VPS is accepting connections when it is not.
+
+## A trading window that is not a time
+
+`PUT /api/schedule/schedule` stored whatever it was sent. The schedule is text,
+parsed when the engines ask whether they may trade, and `_find_active_block`
+swallows a parse failure — so a broken window never matches, the engines stop
+trading or keep trading past a stop, and nothing says why.
+
+Range matters as much as shape and was the part missing: `_parse_hm` is
+`int(h) * 60 + int(m)`, so `"25:00"` parses happily to 1500 minutes. The check
+went into `set_trading_schedule` rather than the router, because a paired node
+forwards its grid straight there.
+
+## Housekeeping done in the same pass
+
+* `services/engines/registry.py` — one table of which engines exist and their
+  bulk lifecycle. The handover had grown a second copy.
+* `api/redaction.py` — one copy of "never echo a credential", now that two
+  routers answer with stored configuration.
+* `notifications_controller` was the last `awaiting-react-port` orphan; wiring
+  the test sends cleared it. **That allowlist class is now empty.**
+* Controller operations with no caller: 18 → 12. Three were deleted rather than
+  re-wired (`parse_hm`, `start_stopped_engines`, `stop_running_engines`) — their
+  behaviour moved to services where it protects every caller, and a forwarder no
+  router calls is a route to nowhere.
+* `test_ui_shutdown_helper.py` asserted `nicegui imports <= 2` against a
+  contract enforced at zero — a test that could not fail. It asserts zero now.
+
+## What the remaining 12 are waiting for
+
+Six (`history_controller.ticket_*_map`) and `system_controller.local_today`
+belong to the Analysis deal-level trade table and its calendar. They are
+blocked on the same owner decision as that table, below, and are not dead.
+
+The other five are surfaces this pass did not reach:
+`sync_controller.is_remote_active`, `is_centralized_remote_mode` and
+`note_remote_setting` (remote-awareness on the engine panels and the signals
+card), `settings_controller.switch_environment_db` (the demo/live environment
+switcher that lived in the app shell) and `get_app_config_async`. Each is one
+question for whoever next touches that surface: wire it or delete it.
+
+## Mutation testing, this pass
+
+29 planted, 28 caught. The one survivor is the `_NOT_BULK_STARTED` guard, and
+it is recorded in `test_handover.py` with the reason it cannot fail today.
+
+---
+
+# Task 130 — catching up with `MooreSi/forex` (2026-09-18)
+
+Six commits landed upstream after this branch's clone point (`1d594cb`..
+`0622ea7`, 2026-09-16 to 2026-09-18): the signal decision log, the lot ceiling,
+CME futures context, instant-entry reporting, and two backfill fixes. About
+5,600 lines.
+
+**The merge itself was nearly clean.** Five conflicts, four of them NiceGUI
+files this branch had deleted and which stay deleted; one real content conflict
+in `telegram_controller.__all__`, where both sides had added an export. Out of
+8,463 tests, four failed and one file would not collect — all five for the same
+reason: an upstream test reads a NiceGUI page that no longer exists.
+
+That is the port's recurring shape and it is worth naming. Upstream writes
+"the switch is reachable" tests that read the page source, which is exactly
+right — `docs/todo/refactor` records a guardrail that scanned a deleted
+directory and printed "all good" for months. Every one of those tests needs its
+subject re-pointed at the React tab, and the assertions themselves carry over
+unchanged.
+
+## What was ported
+
+**CME futures context switch** → the Signal Generator tab's capability list.
+The wording is the feature: there is no CME feed in this build, and turning the
+switch on records an intent and changes nothing the engine decides. An owner
+who turned it on, saw no change and concluded the engine was broken would be
+the failure; believing a later decision was informed by CME data would be
+worse. `test_cme_context_switch.py` reads that text and fails if it stops
+admitting it.
+
+**Signal Decision Log** → a new sub-tab on Parsing, plus
+`api/routers/decision_log.py`. Two readouts, because they become useful at
+different times: the summary is worth reading from the first decision, and
+champion-vs-challenger needs closed trades so it says nothing for days. Neither
+polls — this sits behind a live trading page, and a card that queries a
+database every few seconds for a number that moves twice a day is a cost with
+no benefit. The recording toggle is a 13th parsing switch under a new RESEARCH
+badge, default off.
+
+## The one thing this found
+
+`test_the_card_admits_it_is_not_connected` reads forward from the FIRST
+occurrence of the key in the file. The comment I wrote above the capability
+quoted both phrases the test looks for, so the assertion passed on my own
+comment and the description underneath could have said anything. Two planted
+mutations survived, which is how it was caught; the comment no longer repeats
+them and both mutations now fail.
+
+That is the same class as everything in task 120: a test that cannot fail is
+worse than no test, because it reports a guarantee it is not providing.
+
+## Evidence
+
+```
+python -m tools.checks all   ->  11 of 11, green   (8,463 tests)
+npm test                     ->  239 passed
+```
+
+10 mutations planted against the ported surfaces; 10 caught, after the two that
+survived were made to fail.
+
+## Not merged
+
+Nothing. The branch is level with `upstream/main` as of `0622ea7`.
+
+**`MooreSi/forex` is still untouched by this work** and is free to keep moving.
+Each future catch-up is this same shape, and the cost is proportional to how
+many UI-reachability tests the upstream work brought with it — not to how many
+lines it changed.
+
+---
+
+# Task 140 — the Signal Generator was driving the wrong machine (2026-09-18)
+
+The same defect as the Local/Remote handover in task 120, one screen along, and
+found by the same question: *what does this control do when the other node is
+the one trading?*
+
+**When the remote node is the active trader, this machine's sub-engines are
+stood down.** Pressing Stop on the Signal Generator tab therefore stopped an
+engine that was not running, on a node that is not trading, while the peer's
+copy kept generating signals — and the screen said "stopped". The sync server's
+own `_handle_engine_control` names it exactly: those buttons *"would otherwise
+act on the Mac's own stood-down engine instance, which does nothing useful
+while looking like it worked."* The NiceGUI panels routed around it. The React
+port did not, so every control on that tab was local-only between 2026-09-18
+and this change.
+
+Three separate things had to be right, and each had cost a real evening before:
+
+1. **Where a control lands.** Not "am I in Remote mode": under centralized
+   signal generation the engines moved HERE, so the local ones are the live
+   ones even though the peer trades. `remote_stats_facade` already knew that
+   and `services/cluster/remote_control.py` defers to it rather than
+   re-deriving it.
+
+2. **What the panel shows.** In Remote mode the settings the engines obey are
+   the peer's, so they are overlaid on the local row — overlaid, not replacing
+   it, because the snapshot carries a handful of keys and a wholesale swap
+   would blank every setting the broadcast never sends.
+
+3. **Where "current" is read before a toggle inverts it.** From the local row
+   while writing to the peer, a toggle recomputes the same current on every
+   click and re-sends the same target state for ever. That is the live-confirmed
+   bug the old `note_remote_setting` existed to close: **Bounce stuck OFF,
+   Breakout stuck ON.**
+
+The tab now says which machine it is driving, in three states rather than two.
+"Centralized" is the one an operator would otherwise misread: the header says
+REMOTE and these engines are still the live ones.
+
+**A limit, stated rather than hidden.** The sync protocol carries exactly one
+risk setting between nodes — the AI-evaluation flag, which has its own
+endpoint. Every other tunable has no remote route, so in Remote mode saving one
+writes a row the trading node will not read. The banner says so.
+
+## Debt
+
+Controller operations with no caller: 12 → **9**. Three more were deleted
+rather than re-wired (`is_remote_active`, `is_centralized_remote_mode`,
+`note_remote_setting`): a browser cannot make the snapshot write, and the only
+code that knows a write went to the peer at all is the routing, so all three
+moved into the service with it.
+
+Of the 9 that remain, **seven are one feature**: the six `ticket_*_map`
+builders and `local_today` belong to the Analysis deal-level trade table and
+its calendar, both blocked on the facade decision below. The other two are the
+demo/live environment switcher that lived in the app shell.
+
+## Evidence
+
+```
+python -m tools.checks all   ->  11 of 11, green
+npm test                     ->  244 passed
+```
+
+16 mutations planted across the routing, the router and the banner; 16 caught.
+Floors raised for `backend/src/api` (94.6 → 94.7) and
+`backend/src/services/cluster` (96.5 → 97.1).
+
+**Not signed off.** Starting an engine lets it generate signals again, which is
+the same authority this panel has always had — but it now does so on a machine
+the operator is not sitting at. It belongs with the handover and task 060 in
+the demo session that is still owed.
+
+---
+
+# Task 150 — a halt nobody could see, and the gate that was blind (2026-09-18)
+
+## The circuit breaker was invisible
+
+Two independent things stop automated entries and they are stored under
+different keys: the **risk governor** writes `trade_pause_until` with
+`risk_halt_reason`, and the **circuit breaker** writes
+`circuit_breaker_active_until` onto the risk-settings row after a losing streak.
+
+The NiceGUI header badge read both. The React header read only the governor, so
+**a tripped circuit breaker appeared on no screen except Settings >
+Diagnostics** — an operator looking at the bar that is on every tab would have
+believed automated entries were running while they were being refused.
+
+Worse, the Trading tab *thought* it was checking. It read
+`circuit_breaker.tripped`, and the repo has never returned a `tripped` key —
+`is_active` is the authoritative one. So the check was dead code: a tripped
+breaker left the Execute button **enabled** with no explanation, the backend
+refused the order, and the operator found out by pressing it. This repo already
+says a disabled Execute button with no explanation is indistinguishable from a
+broken one; an enabled one that cannot work is worse.
+
+`services/risk/pause_status.py` answers both now, with the reason and the
+resume time, and reports the LATER of the two expiries — trading resumes when
+the last of them lifts, and giving the earlier one tells the operator to expect
+entries that will still be refused.
+
+**It is a read, and deliberately not the enforcement path.**
+`governor.is_trading_paused()` is the last line of defence and fails CLOSED on
+an unreadable database. This one fails the other way: it renders on every
+header refresh, so an error costs the explanation, never the halt. A test pins
+that it ASKS rather than re-deriving, because a second and laxer copy of that
+logic would eventually be the one somebody wired into a decision.
+
+## The gate that could not see half the layer
+
+`test_controller_operations_have_callers` walks each controller's `__all__`.
+**Thirty public operations across eight controllers were never in it**, so the
+gate had never checked any of them. Declaring them all immediately surfaced
+five with no caller at all:
+
+| Operation | Outcome |
+|---|---|
+| `engines_controller.pro_model_fit` | **Removed.** The blocking refit stops the event loop for ~5s, taking the EA socket reader and the monitor loop with it (bugs/030). No router may call it, and a controller operation exists for a router. The service keeps it for the command line. |
+| `engines_controller.reversal_macro_backfill` | **Removed.** A manual repair tool that changes what the ML gate learns at its next retrain — not something to leave one HTTP route away. |
+| `engines_controller.reversal_reset_stats` | **Wired** — `POST /api/engines/reversal/reset-stats`. Reporting only, and the endpoint says so: "reset" next to a machine-learning engine reads as "forget what you learned". |
+| `auth_controller.load_licence` | **Wired** — `GET /api/node/licence`, with the key masked in the backend. A credential never leaves the machine whole. |
+| `trading_controller.describe_strategy` | **Wired** — each channel-strategy recommendation now carries its human label, so the browser holds no id-to-name mapping and a retired strategy renders as itself rather than blank. |
+
+Also removed: the **eighteen `STRATEGY_*` constants** re-exported through
+`trading_controller`. They existed so Python frontend pages did not have to
+import `utils.models`; those pages are gone, the browser gets the catalogue as
+JSON, and nothing called a single one of them through the controller. They were
+invisible to the caller gate for a different reason — its scan is a substring
+search over `backend/`, and every name appears there in the service that
+genuinely uses it.
+
+## Evidence
+
+```
+python -m tools.checks all   ->  11 of 11, green   (8,556 tests)
+npm test                     ->  252 passed
+```
+
+16 mutations planted (6 on `pause_status`, 3 on the Trading tab's breaker
+check, and the rest on the header); all caught.
+
+Public controller operations not declared in `__all__`: **30 → 0.**
+
+## Also found, not fixed
+
+A latent circular import between `backend/src/db/` and
+`services/cluster/sync_repo`: importing `remote_node_controller` as the very
+first module fails. The app never hits it because its startup order happens to
+import `backend.src.db` first, which means the repo is one import-line reorder
+away from a boot failure with no gate watching. Raised as its own task rather
+than folded in here — it is an import-order fix plus a new gate, and it touches
+the data layer.
+
+---
+
+# Task 160 — the discrepancy audit (2026-09-18)
+
+The owner loaded the app and found features missing and settings moved. This is
+what a key-by-key comparison against the NiceGUI source turned up, and what was
+done about each.
+
+**Method.** Every `app_config` and risk-settings key the old pages *wrote* was
+extracted from the deleted source and searched for across `frontend/src` and
+`backend/src/api`. A key the operator could change before and cannot now is a
+missing control. 52 keys were written by the old UI; **27 had no route at all.**
+
+## Gone, and restored
+
+| What | Was | Consequence while it was missing |
+|---|---|---|
+| **Pause trading** | header dialog | **No way to halt trading from the dashboard.** Sources had to be disabled one at a time, or the database edited. |
+| **Live-execution gates** (`accept_tg_signals`, `bo_live_execution`, `re_live_execution`) | top of Parsing | No way to stop an engine executing. Same answer: edit the database. |
+| **Settings > AI** | its own tab | **No way to enter an API key.** Every AI feature — the Analysis tab, commentary, strategy recommendations, the reversal tuner — unreachable on a fresh install. |
+| **Settings > Security** | its own tab | The password-on-restart setting could not be changed. |
+| **Settings > Registration** | its own tab | Licence holder, expiry and machine ID not visible anywhere. |
+| **18 of 22 risk settings** | Settings > Risk | No give-back guard, circuit breaker, exposure cap, toxic-hour skip, trend gate, fill-delay filter or profit-close from any screen. |
+
+## Moved, not lost
+
+Worth stating plainly, because "missing" and "somewhere else" feel the same
+when you are looking for something:
+
+* **Email** and **Telegram Alerts** → one **Connections** tab.
+* **Update** → **Node & updates**.
+* **Remote Node** → **Remote node** (restored in task 120; it was genuinely
+  missing before that).
+* **Risk** was on the *Trading* page in NiceGUI and is now under Settings.
+* **Theme** is not coming back: dark-only is a recorded decision (QUESTIONS.md
+  Q3), and every colour goes through a token so it stays a decision.
+
+## Bugs the restoration found
+
+**Resuming did not re-arm.** Three surfaces wrote `trade_pause_until` by hand —
+`/pause`, the Telegram panel and the dashboard — and only two of them called
+`rearm_risk_guards()`. Both post-close guards halt for the rest of the broker
+day, so resuming from the dashboard after a give-back halt lasted until the
+next close: the button looked broken and the reason was invisible. All three
+now go through `services/risk/manual_pause.py`.
+
+**Two of the Risk tab's four fields wrote columns that do not exist.**
+`risk_pct` is a column on a different table and `daily_loss_limit_pct` is a
+column nowhere at all, so both raised on save while the box kept showing what
+was typed. The real names are `risk_per_trade_pct` and `max_daily_loss_pct`.
+
+**Autostart turned itself off at every restart.** `app.py` reconciles the OS
+scheduler to `auto_restart_enabled` on boot, and the React toggle installed the
+entry without writing that key — so the watchdog was removed at the next start
+and the toggle still read ON. The write moved into `core_autostart.enable/
+disable`, where every caller gets it.
+
+## The gate
+
+`tests/api/test_settings_writes_reach_the_store.py` now reads **every** screen's
+field list and checks each key against the real schema and the real save
+signatures. That is the check that turns this class of bug from "found by the
+owner opening the app" into "found by CI":
+
+* the Connections tab (email + Telegram),
+* the Risk tab,
+* the Signal Generator's capability switches,
+* the parsing switches,
+* the live-execution gates.
+
+## Still open from the audit
+
+Small, and none of them silently wrong — each is simply a control that has no
+screen yet:
+
+* `bridge_backend` / `mt5_bridge_url` / `wine_bin` / `mt5_bottle_path` — the
+  macOS bridge backend picker (CrossOver vs an independent Wine prefix).
+* `orb_auto_execute_enabled` / `orb_lot_size` — auto-executing the opening-range
+  breakout.
+* `news_blackout_impact` — which impact level the news blackout applies to.
+* `re_ai_tuning_enabled` — the reversal AI tuner's own switch.
+* `ea_bridge_enabled` — the EA bridge toggle on the MT5 tab.
+* `account_env` — the demo/live switch. **Deliberately not built.** Its whole
+  purpose is pointing the app at a real-money account, which is on CLAUDE.md's
+  stop-and-ask list. Its absence is safe; a half-built version would not be.
+
+## Evidence
+
+```
+python -m tools.checks all   ->  11 of 11, green   (8,620 tests)
+npm test                     ->  285 passed
+```
+
+15 mutations planted across the pause service, the risk spec and the gates; 15
+caught.
+
+**Not signed off.** The live-execution gates and the pause decide whether money
+moves. Their tests are green and that is not sign-off — they join the demo
+session already owed for task 060, the handover and the engine controls.
+
+---
+
+# Task 170 — the demo/live switch, and what building it uncovered (2026-09-18)
+
+Built on the owner's explicit instruction, having been flagged twice as theirs
+to decide. It is the control that decides whether the account this app trades
+holds real money.
+
+## The switch
+
+`services/broker/environment.py`. Four things happen together or the app is
+half-switched — reading one account's history while sending orders to the
+other, with neither screen saying so:
+
+1. the target account's credentials are written to `bridge_credentials.json`;
+2. the shared database connection is re-pointed at that environment's file;
+3. `account_env` is persisted;
+4. the app restarts, so every cached handle is rebuilt against the new account.
+
+**The order is the safety property.** Nothing is written until the target's
+credentials have been checked, and the credentials file goes first because it
+is the step that can still fail for reasons the check cannot see.
+
+**Restart rather than an in-place bridge reconnect.** The NiceGUI version told
+the running bridge to change account, with a long tail of handling for a
+reconnect that half-worked, an older bridge build, or autotrading that would
+not re-enable. A restart is atomic and needs nothing past the runtime facade —
+so the facade allowlist did not have to grow after all. The in-place version
+can be added later if those seconds matter; it would need `send_credentials`,
+`reconnect` and `enable_autotrading` on the facade, which is a baseline change.
+
+**Live asks twice, and the second ask names the account.** Nothing else in this
+API requires a confirmation. "Are you sure?" is a question people learn to
+click through; "switch to 900123 on Vantage-Live?" is one they read. Switching
+back to demo is the safe direction and does not ask the same way — dressing it
+up identically would train the habit the guard exists to prevent.
+
+## What building it uncovered
+
+**MT5 credentials could not be saved at all.** The router called
+`save_mt5_credentials(login, password, server)` — three positional arguments to
+a function that takes one dict — so every save raised. And the password column
+is `password_enc`, which is also what the repo encrypts on the way in, so a
+value written as `password` would have missed both. Same defect class as the
+Telegram write, in the one place that decides which broker account the bridge
+logs into.
+
+**The live account had no fields anywhere.** The MT5 tab offered only the demo
+credentials, which meant the demo/live switch could never have been used even
+once it existed: it refuses to switch to an account it has no credentials for.
+
+**The news blackout's impact level could not be changed.** It was in the
+response schema and in the browser's types from the start and was never written
+or rendered — the same shape as the 2026-09-04 bug that endpoint's docstring is
+already about, one key along.
+
+## Also restored in this pass
+
+* `ea_bridge_enabled` — the EA bridge switch, on the MT5 tab.
+* `bridge_backend` / `mt5_bridge_url` — how the bridge runs on macOS.
+* `re_ai_tuning_enabled` — the switch that lets the AI re-tune the reversal
+  settings every fifteen minutes. Its description says so plainly, because a
+  switch that changes other switches is one an operator needs to expect.
+
+## Debt
+
+Controller operations with no caller: 9 → **7**, and all seven are now one
+feature — the Analysis deal-level trade table and its calendar, still blocked on
+the facade decision. `switch_environment_db` and `get_app_config_async` were
+deleted: the first is the middle of the four steps above and offering it alone
+is how an app half-switches; the second had no caller at all.
+
+`settings_controller` went over its 200-line ceiling and the environment
+operations moved into `environment_controller.py`, which is what that ceiling is
+for.
+
+## Evidence
+
+```
+python -m tools.checks all   ->  11 of 11, green   (8,662 tests)
+npm test                     ->  307 passed
+```
+
+10 mutations planted against the switch and its guards; 10 caught.
+
+**The switch itself has never been exercised.** Its tests are green, no test
+has ever switched anything, and nothing here has touched a broker. Pointing
+this app at a live account for the first time is the owner's to do, with the
+demo session that is already owed.
+
+---
+
+# Task 180 — the ORB card, and where a manual order lands (2026-09-19)
+
+The last card the audit found missing, and the routing gap it exposed on the
+way.
+
+## The ORB report
+
+`frontend/pages/trading/_manual_entry.py` carried the London opening-range
+breakout card and the React port dropped it, so the report, its chart, the
+Execute button, the lot size and the unattended auto-execute were all
+unreachable. `api/routers/orb.py` + `OrbSection`.
+
+Classic ORB: the whole Asian session is a confirmation filter, the first
+fifteen minutes of London is the traded range, and a breakout only counts once
+price clears both in the same direction.
+
+**The stop and target sent to the broker are the ones that were on screen.**
+The report moves as price does, so the execute endpoint takes them from the
+request rather than re-reading — recomputing on the way to the broker would
+open a trade against numbers the operator never saw. A planted mutation that
+recomputed them is caught.
+
+**The chart is rendered by the backend** and returned base64. Drawing it in the
+browser would be a second implementation of the same maths with a second chance
+to disagree with the figures printed beside it. A chart that fails to render
+does not take the report down with it — the numbers are the point.
+
+The 3:1 level is shown and labelled info-only, because the automated path
+closes fully at the 2:1 target and manages no partial ladder. Saying otherwise
+by omission invites the operator to expect a runner.
+
+## The routing gap it exposed
+
+The manual **Market Order** button had the same defect as the Signal Generator
+controls. When the remote node is the active trader this one is stood down and
+`open_trade` refuses with *"Trading stood down — the VPS is the active
+trader"*. That is safe, and it is also a lost capability: the NiceGUI button
+forwarded the order over the sync channel so it executed on the machine holding
+the account. The React port kept the refusal and lost the forwarding.
+
+`remote_control.place_market_order` is that forwarding, and both the Market
+Order button and the ORB Execute go through it. **No fallback** — a peer that
+cannot be reached is a refusal, never a reason to place the order here, because
+here is either stood down or a node the operator believes is idle.
+
+A local `ValueError` still propagates unwrapped: "DPM is disabled and no stop
+loss was given" is the engine saying no with a reason that has to reach the
+screen.
+
+## Evidence
+
+```
+python -m tools.checks all   ->  11 of 11, green
+npm test                     ->  326 passed
+```
+
+12 mutations planted across the routing and the ORB endpoint; 12 caught.
+
+**Not signed off, and this one matters most.** Execute opens a real position,
+and `place_market_order` now decides which machine receives every manual order
+in the app. No test has touched a broker. This belongs at the front of the demo
+session already owed for task 060, the handover, the engine controls and the
+demo/live switch.
+
+## What is left
+
+Controller operations with no caller: **7**, all of them one feature — the
+Analysis deal-level trade table and its calendar, blocked on the facade
+allowlist decision. That is the only item from the discrepancy audit not built.
+
+---
+
+# 2026-09-19 — the Analysis trade table, and the port is complete
+
+The last item from the discrepancy audit. It was blocked on a decision, not on
+code: the NiceGUI page built this table from `engine._bridge.get_deal_history()`,
+which is past the controller boundary, and the three routes out of that were
+listed above under *"The one thing still missing, and why it needs you"*.
+Option 1 was taken.
+
+## Two baselines rose, for one method
+
+Both are recorded where the gate reads them, and both are trivially reversible.
+
+* `facade_baseline.json`: **89 -> 90**, with `get_deal_history` added to
+  `facade_allowlist.json`. Deliberately **one** method. The table's spread
+  column also wanted `get_tick_at()` to backfill uncached tickets; it renders
+  from the existing spread cache instead and shows an em dash where there is
+  none. A second name is a second decision.
+* `structure_baseline.json` loc, `backend/src/runtime.py`: **1513 -> 1518**.
+  The same five lines, counted by a different gate — exactly the 2026-09-03
+  `get_ticks_range` case. The method's docstring was cut to two lines to keep
+  the rise at five; the full rationale lives in `facade_baseline.json` rather
+  than being duplicated in the source.
+
+Raising a ratchet is on CLAUDE.md's stop-and-ask list. The sign-off was given
+in-session. If it is to be reversed, it is one method in `runtime.py`, one
+allowlist name, two baseline numbers and one React sub-tab.
+
+## What it shows, and what each blank means
+
+`services/analytics/trade_table.py` groups MT5 deals by `position_id` and
+merges the six `ticket_maps` onto them. Built from **MT5's own record**, so a
+trade opened by hand in the terminal or by the copier EA appears even though it
+never had a local row; `comment_attribution_maps` fills those in from the
+opening order's comment, with `setdefault` so a real local row always wins over
+an inference.
+
+Three blanks mean three different things, and the tests pin all three:
+
+* **Max TP** empty means the 30-minute window has not elapsed; `...` means it
+  has and the sweep has not caught up. "None" would say a trade never went the
+  operator's way when nothing has looked yet.
+* **pips** and **held** show an em dash when the opening deal is outside the
+  window — not `0.0` and not `0m`, either of which reads as a scratched trade.
+* **error** is a separate field from an empty row list, because "no trades in
+  this window" and "the bridge is down" look identical in an empty table and
+  call for completely different responses.
+
+The lots column shows the partial-close breakdown (`0.30 (0.10 + 0.20)`); a
+single number would hide that the position came off in pieces, which is the
+thing a strategy review is for.
+
+## Its own endpoint, and not the default tab
+
+`GET /api/history/trades` is separate from `/api/history/state`. `/state`
+returns aggregates bounded by the channel count and a 7x24 grid; this is a row
+per trade, and ten years of them is what forced the old WebSocket buffer from
+1MB to 10MB. It is the last sub-tab and the tab still opens on the heatmap, so
+nothing is fetched until somebody asks for it. `HistoryPanel.test.tsx` pins
+both halves: one request on load, and `?days=365` on the trades endpoint after
+the window is changed and the tab opened.
+
+One bug the tests caught before it shipped: the first version rendered
+`close_ts` with `toLocaleString`. A deal stamp is broker time (UTC+3), so every
+close read three hours into the future — entirely plausible on a trade table.
+`formatBrokerTime` was already there for exactly this.
+
+## Debt
+
+Controller operations with no caller: 7 -> **0**. `AWAITING_REACT_PORT` in
+`test_controller_operations_have_callers.py` is now an empty set with
+`assert len(AWAITING_REACT_PORT) == 0`, so the exemption list cannot quietly
+grow again. The six `ticket_*_map` forwarders were deleted rather than wired:
+`trade_table.py` is a service and reaches `ticket_maps` directly, and a
+forwarder no router calls is a route to nowhere. `history_controller` went 204
+-> 178 lines in the process, back under the 200-line ceiling.
+
+## Evidence
+
+```
+python -m tools.checks all   ->  11 of 11, green
+npm test                     ->  343 passed
+```
+
+Six mutations planted in the React table — broker-time stamp, the partial-close
+threshold, the `asArray` boundary, the pips em dash, the duration branch and
+the `days` query parameter; six caught.
+
+Nothing here places, closes or modifies anything. It is a read behind one
+table, and it needs no demo session. The five items that do still need one are
+unchanged: task 060's money controls, the Local/Remote handover, starting an
+engine on a machine the operator is not sitting at, the demo/live switch and
+`place_market_order`.
+
+## What is left
+
+Nothing from the discrepancy audit. The port has no missing feature.
+
+What remains is housekeeping and sign-off: three files still over 800 LOC
+(largest 1528), and the demo session owed for the five money paths above.

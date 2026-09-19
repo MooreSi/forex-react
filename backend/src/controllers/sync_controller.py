@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from backend.src.services.cluster import handover as _handover
 from backend.src.services.cluster.sync import client as _client
 from backend.src.services.cluster.sync import remote_stats_facade as _facade
 from backend.src.services.cluster.sync import server as _server
@@ -24,12 +25,13 @@ from backend.src.services.cluster.sync.protocol import TRADER_REMOTE_VPS
 
 __all__ = [
     "TRADER_REMOTE_VPS", "DEFAULT_SYNC_PORT",
-    "link_state", "is_connected", "note_remote_setting",
+    "link_state", "is_connected",
     "load_config", "configure", "start", "stop",
     "send_engine_control", "send_market_order", "request_model_snapshot",
     "request_stand_down", "request_resume", "push_ai_config",
+    "take_over_locally", "hand_back_to_remote", "HandoverRefused",
     "get_remote_open_position",
-    "is_remote_active", "is_centralized_remote_mode", "make_stats_facades",
+    "make_stats_facades",
     "cert_fingerprint", "server_start", "server_stop", "server_is_running",
 ]
 
@@ -55,18 +57,12 @@ def link_state() -> dict:
     }
 
 
-def note_remote_setting(key: str, value) -> None:
-    """Record a value the peer has just acked into its confirmed snapshot.
-
-    `link_state()` hands back a copy so a page cannot mutate service state by
-    accident -- but this particular write is real behaviour, not an accident.
-    The periodic settings broadcast is otherwise the only thing that updates
-    the snapshot, and without this write the next click recomputes the same
-    "current" and the toggle sticks one-directional. That was confirmed live:
-    Bounce stuck OFF, Breakout stuck ON, every click re-sending the same
-    target state.
-    """
-    _client.get_instance().remote_settings[key] = value
+# `note_remote_setting` was here so a page could write the peer's ack into the
+# confirmed snapshot -- without it the next click recomputes the same "current"
+# and the toggle sticks one-directional (confirmed live: Bounce stuck OFF,
+# Breakout stuck ON). The browser cannot do that write, so it moved with the
+# rest of the routing into services/cluster/remote_control.py, which is also
+# the only place that knows a write went to the peer at all.
 
 
 def load_config() -> tuple[str, int, str]:
@@ -113,6 +109,22 @@ async def request_resume(timeout: float = 15.0) -> None:
     return await _client.get_instance().request_resume(timeout=timeout)
 
 
+# ── Handing trading control over ─────────────────────────────────────────────
+# The ORDER inside these is the safety property -- exactly one node may execute
+# new trades against the shared account. It lives in services/cluster/handover.py,
+# which is where the sequence and its failure behaviour are documented.
+
+HandoverRefused = _handover.HandoverRefused
+
+
+async def take_over_locally(*args, **kwargs) -> dict:
+    return await _handover.take_over_locally(*args, **kwargs)
+
+
+async def hand_back_to_remote(*args, **kwargs) -> dict:
+    return await _handover.hand_back_to_remote(*args, **kwargs)
+
+
 async def push_ai_config(updates: dict) -> None:
     return await _client.get_instance().push_ai_config(updates)
 
@@ -123,12 +135,11 @@ def get_remote_open_position(mt5_ticket) -> Optional[dict]:
 
 # ── Mode + stats ─────────────────────────────────────────────────────────────
 
-def is_remote_active() -> bool:
-    return _facade._is_remote_active()
-
-
-def is_centralized_remote_mode() -> bool:
-    return _facade._is_centralized_remote_mode()
+# `is_remote_active` and `is_centralized_remote_mode` were here for the engine
+# panels. Under React the panel cannot branch on them usefully on its own --
+# the command has to be ROUTED, not just labelled -- so both live in
+# services/cluster/remote_control.py with the routing they inform, and the API
+# layer asks that one question ("where will this land?") instead of two.
 
 
 def make_stats_facades(key: str, db_module, ml_module=None, params_module=None):

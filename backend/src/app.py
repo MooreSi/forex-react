@@ -132,6 +132,33 @@ def _is_somebody_elses_client() -> bool:
         return True
 
 
+def _admin_checkout_candidates(forex_root: Path) -> list:
+    """Where the admin console may live, in priority order.
+
+    `~/forex-admin` is the tracked git checkout (MooreSi/forex-admin) and
+    leads deliberately: it is the only one with history, tests and CI, and it
+    is the one both this app and the React app are developed against.
+
+    The two `KeyGen` entries are the arrangement that predates it -- untracked
+    copies with the private signing key inline in the source. They are kept so
+    a machine that has not moved over still works, and they are LAST because
+    `~/Documents` is iCloud-synced: an evicted `licences.db` there is what
+    hung this app's startup on 2026-08-07 (see `_import_with_timeout`).
+
+    Retiring them is a decision queued in the console repo at
+    docs/simon-handover/002-retire-the-legacy-keygen-paths.md. Until then the
+    order is the whole guarantee that the tracked copy is the one that runs --
+    and note that whichever wins goes onto sys.path at position 0, so a
+    fallback winning also changes which `database.py` and `licence_signing.py`
+    anything else resolves.
+    """
+    return [
+        Path.home() / "forex-admin",                 # tracked checkout — wins
+        forex_root.parent / "KeyGen",                # legacy sibling
+        Path.home() / "Documents" / "KeyGen",        # legacy, iCloud-synced
+    ]
+
+
 def _find_admin_open_fn():
     """Look for KeyGen/forex_admin.py next to the FOREX directory.
     Adds KeyGen to sys.path if found and returns open_admin_dialog, else None.
@@ -151,10 +178,7 @@ def _find_admin_open_fn():
                  "install runs as a client (see licence/issuer.py)")
         return None
     forex_root = Path(__file__).parent.parent.parent  # forex_trader/core/app_lifecycle.py → FOREX/
-    candidates = [
-        forex_root.parent / "KeyGen",               # sibling: ~/Documents/KeyGen
-        Path.home() / "Documents" / "KeyGen",        # explicit home fallback
-    ]
+    candidates = _admin_checkout_candidates(forex_root)
     for kg_path in candidates:
         if (kg_path / "forex_admin.py").exists():
             if str(kg_path) not in sys.path:
@@ -187,10 +211,7 @@ def _find_remote_admin_open_fn():
     if not flag.exists():
         return None
     forex_root = Path(__file__).parent.parent.parent
-    candidates = [
-        forex_root.parent / "KeyGen",
-        Path.home() / "Documents" / "KeyGen",
-    ]
+    candidates = _admin_checkout_candidates(forex_root)
     for kg_path in candidates:
         if (kg_path / "admin_panel.py").exists():
             if str(kg_path) not in sys.path:
@@ -208,20 +229,50 @@ def _find_remote_admin_open_fn():
     return None
 
 
+def _is_admin_host() -> bool:
+    """Does this machine HOST the console -- i.e. should it run the admin
+    SERVER -- regardless of whether the console's UI can render here?
+
+    Until 2026-09-19 this was `_find_admin_open_fn() is not None`, which made
+    the answer depend on a successful `import forex_admin` -- and that module
+    imports NiceGUI. The React app (MooreSi/forex-react) removed NiceGUI from
+    its dependencies entirely on 2026-09-18, so on a clean install of that app
+    the import fails, this reads False, and **the licence-issuer Mac quietly
+    starts the remote CLIENT instead of the server** -- dialling a fleet
+    server that is not running, with no fleet and no console.
+
+    It only worked at all because a stale `nicegui` happened to be left in
+    that app's virtualenv. Hosting the fleet is a property of the machine
+    (issuer hardware + a console checkout + not already somebody's client),
+    not of which UI toolkit is installed, so it is decided from those.
+
+    `admin_open_fn` is still the NiceGUI import, because that genuinely is
+    "can this app draw the console" -- the two questions are now separate.
+    """
+    if _is_somebody_elses_client():
+        return False
+    if not _is_licence_issuer_machine():
+        return False
+    forex_root = Path(__file__).parent.parent.parent
+    return any((candidate / "forex_admin.py").exists()
+               for candidate in _admin_checkout_candidates(forex_root))
+
+
 admin_open_fn = _find_admin_open_fn()
-# Only the machine holding KeyGen runs the admin SERVER. A granted remote admin
-# gets a console (admin_panel.py, driven over the WS connection) and therefore
-# ADMIN_AVAILABLE too, but it must keep dialling the server rather than
-# becoming one -- so the two facts are kept apart.
-LOCAL_ADMIN_AVAILABLE = admin_open_fn is not None
+# Only the machine hosting the console runs the admin SERVER. A granted remote
+# admin gets a console (admin_panel.py, driven over the WS connection) and
+# therefore ADMIN_AVAILABLE too, but it must keep dialling the server rather
+# than becoming one -- so the two facts are kept apart.
+LOCAL_ADMIN_AVAILABLE = _is_admin_host()
 if admin_open_fn is None:
     admin_open_fn = _find_remote_admin_open_fn()
 ADMIN_AVAILABLE = admin_open_fn is not None
 
 
 def _should_start_remote_server() -> bool:
-    """True on the machine that issues licences: KeyGen present AND an admin
-    password set. Everything else runs the client (see startup())."""
+    """True on the machine that issues licences: a console checkout present,
+    the issuer hardware, AND an admin password set. Everything else runs the
+    client (see startup())."""
     return LOCAL_ADMIN_AVAILABLE and password_is_set()
 
 # ── App-wide singletons ──────────────────────────────────────────────────────
@@ -405,6 +456,16 @@ async def startup() -> None:
         _pro_corpus.init()
     except Exception as _e:
         log.error("[startup] Pro corpus init failed: %s", _e)
+    # The Telegram decision log's two tables (2026-09-18). Same database and
+    # the same reason as the corpus above: one file across demo and live, so
+    # a study does not split when the account does. Creating the schema costs
+    # nothing when the toggle is off -- and NOT creating it would turn every
+    # write into a silent debug-level failure the day it is switched on.
+    try:
+        from backend.src.services.signals import decision_log_repo as _dec_log
+        _dec_log.create_schema()
+    except Exception as _e:
+        log.error("[startup] Decision log schema failed: %s", _e)
     from backend.src.services.reversal_engine import ml_engine as _re_ml
     _re_ml.init(str(_DATA_DIR))
     _re_engine_module.init(_engine._bridge)

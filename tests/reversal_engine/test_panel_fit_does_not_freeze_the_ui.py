@@ -25,14 +25,16 @@ is really gone rather than checking how it behaves.
 """
 from __future__ import annotations
 
+import pathlib
+
 import inspect
 
-from backend.src.controllers import engines_controller
+from backend.src.controllers import reversal_controller
 
 
 class TestTheControllerOffersANonBlockingFit:
     def test_it_exists(self):
-        assert hasattr(engines_controller, "pro_model_fit_in_background")
+        assert hasattr(reversal_controller, "pro_model_fit_in_background")
 
     def test_it_delegates_to_the_services_background_fit(self, monkeypatch):
         from backend.src.services.reversal_engine import pro_model as pm
@@ -40,14 +42,27 @@ class TestTheControllerOffersANonBlockingFit:
         monkeypatch.setattr(pm, "fit_in_background",
                             lambda force=False: seen.update(force=force))
 
-        engines_controller.pro_model_fit_in_background(force=True)
+        reversal_controller.pro_model_fit_in_background(force=True)
 
         assert seen == {"force": True}
 
     def test_the_blocking_one_is_still_available(self):
         """Nothing else should lose the ability to fit synchronously; the
-        point is only that the UI stops doing it."""
-        assert hasattr(engines_controller, "pro_model_fit")
+        point is only that the UI stops doing it.
+
+        It lives on the SERVICE. It was re-exported through the controller
+        until 2026-09-18, which was the wrong place for it in the end: a
+        controller operation exists for a router to call, and no router may
+        ever call this one. Removing it from that layer makes "the UI stops
+        doing it" structural rather than a matter of remembering.
+        """
+        from backend.src.services.reversal_engine import pro_model
+
+        assert callable(pro_model.fit)
+        assert not hasattr(reversal_controller, "pro_model_fit"), (
+            "the blocking fit is back on the controller, where a router can "
+            "reach it -- five seconds of frozen event loop (bugs/030)"
+        )
 
 
 class TestThePanelNoLongerOffersTheToggle:
@@ -61,9 +76,17 @@ class TestThePanelNoLongerOffersTheToggle:
 
     @staticmethod
     def _panel_source() -> str:
-        from frontend.pages import reversal_panel
+        """The dashboard's source, whatever the dashboard currently is.
 
-        return inspect.getsource(reversal_panel)
+        Was `inspect.getsource(frontend.pages.reversal_panel)` until
+        2026-09-18, when the big-bang React replace deleted that panel ahead of
+        its React equivalent. The claims below are not about NiceGUI — they are
+        about what the engine panel is allowed to offer and allowed to call —
+        so they follow the UI rather than being deleted with the old one.
+        """
+        from tests.refactor._react_port import web_sources
+
+        return web_sources()
 
     def test_the_toggle_is_gone(self):
         src = self._panel_source()
@@ -71,10 +94,19 @@ class TestThePanelNoLongerOffersTheToggle:
         assert "Learn From Pro Signals" not in src
 
     def test_the_panel_never_calls_the_blocking_fit(self):
-        """The rule that survives the removal. A five-second RandomForest
-        train on a NiceGUI handler freezes the UI, the EA socket reader and
-        the monitor loop together; the EA reconnects after ten seconds of
-        Python silence."""
-        body = "\n".join(l for l in self._panel_source().splitlines()
-                          if not l.strip().startswith("#"))
-        assert "pro_model_fit(" not in body
+        """The rule that survives both the removal and the port. A five-second
+        RandomForest train started from a UI handler freezes the event loop,
+        the EA socket reader and the monitor loop together; the EA reconnects
+        after ten seconds of Python silence.
+
+        In React the UI cannot call it directly at all — it would have to go
+        through a router. So the assertion moved to where the risk now lives:
+        no endpoint in the API layer may call the blocking fit.
+        """
+        api = pathlib.Path(__file__).resolve().parents[2] / "backend" / "src" / "api"
+        sources = list(api.rglob("*.py"))
+        assert sources, "the API layer has no Python in it — this scan is inert"
+        for path in sources:
+            body = "\n".join(l for l in path.read_text(encoding="utf-8").splitlines()
+                              if not l.strip().startswith("#"))
+            assert "pro_model_fit(" not in body, path

@@ -5,10 +5,8 @@
     "(orphan_modules --check) fails on any orphan NOT listed, and on any listed",
     "module that is no longer an orphan (delete its entry when you delete/wire it).",
     "",
-    "The 3 superseded-dead database.py clones were DELETED 2026-08-10. The 4 below",
-    "are built-but-UNWIRED (not dead): deleting them would destroy real",
-    "functionality and hide a wiring bug. Each needs an OWNER (Simon) wire-vs-remove",
-    "decision -- see docs/questions/002-unwired-modules.md. Do NOT delete until then."
+    "The 3 superseded-dead database.py clones were DELETED 2026-08-10. The 3 below are built-but-UNWIRED (not dead): deleting them would destroy real functionality and hide a wiring bug. Each needs an OWNER (Simon) wire-vs-remove decision -- see docs/questions/002-unwired-modules.md. Do NOT delete until then.",
+    "2026-09-18 (final): the eight remaining tabs, the rest of the Trading tab, the node/update panel and the licence screens all landed. Every 'awaiting-react-port' entry is gone. notifications_controller was the last of them and outlived the port because the Settings tab shipped without the test-send buttons that used it; wiring those (routers/notifications.py) cleared it. The three entries left are the pre-React debts this file was opened for."
   ],
   "allowed": [
     {

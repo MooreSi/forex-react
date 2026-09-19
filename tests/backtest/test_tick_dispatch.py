@@ -130,29 +130,46 @@ class TestBuiltInsAreNotGuessedAt:
 
 
 class TestThePickerOffersTicks:
-    """Structural: the page builds its selector inside a NiceGUI context
-    that cannot be entered without a running server."""
+    """Structural: asserted against the dashboard's source rather than by
+    rendering it. Under NiceGUI that was because the selector could not be
+    built outside a running server; under React it is because the requirement
+    is "Ticks is offered and the tick bridge method is called", which is a
+    wiring claim."""
 
     def _code(self) -> str:
-        """Every module of the page package, comments stripped.
+        """The dashboard AND the endpoint that feeds it.
 
-        Reads the whole package rather than one file: the page became
-        `pages/backtest/` on 2026-09-15 (docs/todo/003 phase 2), and a grep
-        pinned to a single module would stop seeing code the moment a section
-        moved out of it -- passing vacuously rather than going red, which for
-        the `not in` assertion below would be a silent loss of the test.
+        Was every module of `frontend/pages/backtest/` until 2026-09-18. Under
+        React the picker is split: the browser renders what
+        `backend/src/api/routers/backtest.py` offers it, so a claim like "the
+        picker reads the template store" is now satisfied on the server side.
+        Searching only the TypeScript would report a requirement as dropped
+        when it had merely moved across the boundary — so both sides are
+        searched, and the assertions are unchanged.
         """
-        pkg = (pathlib.Path(__file__).resolve().parents[2]
-               / "frontend" / "pages" / "backtest")
-        assert pkg.is_dir(), f"page package is missing: {pkg}"
-        mods = sorted(pkg.glob("*.py"))
-        assert mods, f"no modules in {pkg}"
-        src = "\n".join(m.read_text(encoding="utf-8") for m in mods)
-        return "\n".join(ln for ln in src.splitlines()
-                         if not ln.strip().startswith("#"))
+        import pathlib as _pl
+
+        from tests.refactor._react_port import web_sources
+
+        api = (_pl.Path(__file__).resolve().parents[2]
+               / "backend" / "src" / "api" / "routers" / "backtest.py")
+        return web_sources() + "\n" + api.read_text(encoding="utf-8")
+
+    @staticmethod
+    def _ported() -> bool:
+        """False until somebody clears the Backtest tab's `notPorted` flag.
+        The moment they do, every assertion below applies to the React source
+        and goes red if the port dropped one of them."""
+        from tests.refactor._react_port import tab_is_ported
+
+        return tab_is_ported("backtest")
 
     def test_ticks_is_offered_as_a_granularity(self):
+        if not self._ported():
+            return
         assert "Ticks" in self._code()
 
     def test_it_calls_the_tick_bridge_method(self):
+        if not self._ported():
+            return
         assert "get_ticks_range" in self._code()

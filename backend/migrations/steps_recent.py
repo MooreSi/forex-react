@@ -122,4 +122,48 @@ _RECENT: list[tuple[int, str, object]] = [
     (45, "Asian-session exemption for the trend gate, off by default", [
         "ALTER TABLE vantage_risk_settings ADD COLUMN htf_bias_asian_exempt INTEGER NOT NULL DEFAULT 0",
     ]),
+
+    # CME futures context (owner request 2026-09-17). Spot XAUUSD on this
+    # broker publishes bid/ask and no Last, so there is no trade side and
+    # "volume" everywhere in this system is tick volume -- a count of quote
+    # changes, not size (see services/market/order_flow.py). GC futures are
+    # the lit venue where gold prints real size, and the only route to
+    # measured flow rather than a tick-rule proxy.
+    #
+    # NOTHING CONSUMES THIS YET. There is no CME feed in the repo; the
+    # column records the intent and capability_gates.cme_context_enabled is
+    # its only reader. Daily GC volume and open interest are free from CME;
+    # the open question is whether futures flow predicts anything about
+    # these trades, which nobody has measured -- docs/simon-handover/039.
+    (46, "CME futures context switch, off by default", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN re_cme_context_enabled INTEGER NOT NULL DEFAULT 0",
+    ]),
+
+    # The Telegram decision log (2026-09-18), Parsing page. Records what the
+    # app decided about each Telegram signal and what the trade then did,
+    # plus what four gates that are currently OFF would have decided --
+    # champion and challenger, recorded, never acted on. See
+    # docs/todo/signal-validation/010.
+    #
+    # Off by default and inert when off: it sits on the order path, and the
+    # measured IME budget is 269 ms end to end with 256 ms of that the
+    # broker POST. The rows go to reversal_engine.db, which is one file
+    # across demo and live -- this column only says whether to write them.
+    (47, "Telegram decision log, off by default", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN tg_decision_log_enabled INTEGER NOT NULL DEFAULT 0",
+    ]),
+
+    # Set & Forget (2026-09-19), Trading > Set & Forget. The lot size that
+    # section's Execute button sends, and nothing else. 0 means "size it from
+    # Risk per trade % and the stop distance", exactly as orb_lot_size does --
+    # same meaning, same default, so this changes nobody's behaviour.
+    #
+    # Deliberately NOT in sync/server.py's synced key list, unlike
+    # orb_lot_size. ORB has an unattended scheduler that reads the value on
+    # whichever node is trading, so the value has to reach that node. Set &
+    # Forget has no unattended path at all: every order starts with a person
+    # pressing Execute, and the lot travels WITH that order.
+    (48, "Set & Forget lot size, 0 = size from risk %", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN setforget_lot_size REAL NOT NULL DEFAULT 0",
+    ]),
 ]

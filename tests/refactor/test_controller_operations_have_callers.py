@@ -1,22 +1,18 @@
 """A controller operation exists to be called by something that is not a test.
 
-The layering rule is `frontend/ → controllers/ → services/`, and a controller
-is *"a flat `<name>_controller.py` that names an operation and forwards it to
-one service"*. So every name a controller exports is a route the UI uses. One
-that nothing in `backend/` or `frontend/` mentions is a route to nowhere.
+The layering rule is `backend/src/api/ → controllers/ → services/`, and a
+controller is *"a flat `<name>_controller.py` that names an operation and
+forwards it to one service"*. So every name a controller exports is a route the
+UI uses. One that nothing in `backend/` mentions is a route to nowhere.
 
-The layer is in good shape: **252 of 255 exported operations are referenced.**
-That is what makes this worth gating rather than baselining — three exceptions,
-not three hundred.
+**A test caller does not count.** An operation exercised only by its own test
+shows green in the coverage report and proves nothing about whether the app
+wants it. A test that keeps dead code looking alive is the exact shape this
+repo's rules were written after: *"an audit found ~3,000 lines of extracted code
+nothing called"*. `sync_controller.make_stats_facades` is the current example,
+and `TestTheScannerCanSee.test_tests_are_not_searched` pins it.
 
-**A test caller does not count, and `engines_running` is why.** It is exported,
-it is defined, and `tests/controllers/test_engines_controller_lifecycle.py`
-calls it — so the coverage report shows it green and the suite proves it works.
-Nothing in the app has ever called it. A test that keeps dead code looking alive
-is the exact shape this repo's rules were written after: *"an audit found ~3,000
-lines of extracted code nothing called"*.
-
-Shrink-only. The known-dead set may lose entries and must never gain one.
+Both sets are shrink-only and neither may gain an entry.
 """
 from __future__ import annotations
 
@@ -31,14 +27,41 @@ _CONTROLLERS = sorted(
     p.as_posix() for p in (REPO / "backend/src/controllers").glob("*_controller.py")
 )
 
-# Known dead. Each is a controller operation no page calls.
+# Waiting for a caller that the React port has not written yet.
+#
+# **This is not KNOWN_DEAD and must not be merged into it.** Dead means nobody
+# wants it; these were each called by a NiceGUI tab that the big-bang replace
+# on 2026-09-18 deleted before its React equivalent existed. The operation is
+# unchanged and still tested; the tab that asks for it is task 080 in
+# docs/todo/frontend/react-port/.
+#
+# The set is **shrink-only** and it is meant to reach zero. Every entry is one
+# question a router will have to ask. If task 080 finishes and an entry is
+# still here, that is the evidence it was genuinely dead all along — and then
+# it becomes a delete, not a move into KNOWN_DEAD.
+#
+# It mirrors the `awaiting-react-port` class in
+# tools/refactor_audit/orphan_module_allowlist.json: same cause, same debt,
+# same removal condition.
+# **Empty, as of 2026-09-19.** It held 47 operations the big-bang replace
+# orphaned when eight NiceGUI tabs were deleted ahead of their React
+# equivalents, and every one of them now has a caller, has been deleted as
+# genuinely dead, or moved into the service that actually uses it.
+#
+# The last seven went together because they were one feature: the six
+# `ticket_*_map` builders and `system_controller.local_today` belong to the
+# Analysis deal-level trade table and its calendar, which needed
+# `get_deal_history` on the runtime facade -- an allowlist entry, and therefore
+# the owner's word (facade_baseline.json records it, 89 -> 90).
+#
+# It stays here, empty, rather than being deleted: `test_neither_set_has_slack`
+# is what keeps it honest, and a future port has somewhere to record its debt
+# with the same shrink-only rule.
+AWAITING_REACT_PORT: set[tuple[str, str]] = set()
+
+# Known dead. Each is a controller operation nothing calls and nothing wants.
 KNOWN_DEAD = {
-    # Exported and tested, called by nothing. See the docstring.
-    ("engines_controller", "engines_running"),
-    # Named in its own module docstring as the one that returns a service
-    # object -- and nothing asks it for one.
     ("sync_controller", "make_stats_facades"),
-    ("sync_controller", "server_is_running"),
 }
 
 
@@ -61,21 +84,50 @@ def _dead() -> set[tuple[str, str]]:
 
 class TestEveryControllerOperationIsCalled:
     def test_no_new_routes_to_nowhere(self):
-        unexpected = _dead() - KNOWN_DEAD
+        unexpected = _dead() - KNOWN_DEAD - AWAITING_REACT_PORT
 
         assert not unexpected, (
             f"controller operations nothing calls: {sorted(unexpected)} — a "
-            "controller names an operation for a page to use. Wire it up or "
-            "delete it; do not add it to KNOWN_DEAD."
+            "controller names an operation for a router to use. Wire it up or "
+            "delete it; do not add it to KNOWN_DEAD or AWAITING_REACT_PORT."
         )
 
-    def test_the_known_dead_set_has_no_slack(self):
-        assert _dead() == KNOWN_DEAD
+    def test_neither_set_has_slack(self):
+        """Both are exact. An entry that is no longer dead must be removed in
+        the change that revives it, or the set stops describing anything."""
+        assert _dead() == KNOWN_DEAD | AWAITING_REACT_PORT
 
-    def test_the_layer_is_overwhelmingly_alive(self):
+    def test_the_two_sets_do_not_overlap(self):
+        """'Nobody wants it' and 'its caller is not written yet' are different
+        claims with different endings. A name in both is a name whose status
+        nobody has decided."""
+        assert not (KNOWN_DEAD & AWAITING_REACT_PORT)
+
+    def test_the_port_debt_is_bounded_and_named(self):
+        """The honest number, recorded so it can be watched shrinking.
+
+        47 operations lost their caller on 2026-09-18 when eight NiceGUI tabs
+        were deleted ahead of their React replacements. Porting those tabs took
+        it to 31; finishing the Trading tab, the node/update panel and the
+        licence screens took it to 18; the Connections/Remote Node pass took it
+        to 12, routing the Signal Generator's controls at the node that is
+        actually trading took it to 9, the discrepancy audit took it to 7, and
+        the Analysis trade table — the last seven, which were one feature —
+        took it to **zero** on 2026-09-19.
+
+        Zero is the number now, and it may not rise. A new entry means a tab
+        was deleted ahead of its replacement again, or a controller operation
+        was added with no router to call it.
+        """
+        assert len(AWAITING_REACT_PORT) == 0, (
+            "the React port debt grew — a new tab deletion, or a controller "
+            "operation added with no router to call it"
+        )
+
+    def test_the_layer_is_still_mostly_alive(self):
         """The number that makes this a gate rather than a wish. If exports
-        ever drift far above callers, this file is measuring the wrong thing
-        and should be re-argued rather than baselined."""
+        ever drift far above callers for a reason that is NOT the port, this
+        file is measuring the wrong thing and should be re-argued."""
         exported = 0
         for path in _CONTROLLERS:
             mod = importlib.import_module(_rel(path)[:-3].replace("/", "."))
@@ -83,7 +135,8 @@ class TestEveryControllerOperationIsCalled:
                             if not n.startswith("_"))
 
         assert exported > 200
-        assert len(_dead()) <= 5
+        # Excluding the port debt, the layer is as tight as it ever was.
+        assert len(_dead() - AWAITING_REACT_PORT) <= 5
 
 
 class TestTheScannerCanSee:
@@ -94,12 +147,20 @@ class TestTheScannerCanSee:
         assert not references_to("controller_operation_that_never_existed", exclude=())
 
     def test_tests_are_not_searched(self):
-        """`engines_running` HAS a caller, in tests/. The scan looks only at
-        backend/ and frontend/ on purpose, and this is the assertion that says
-        so -- widen it to tests/ and this gate stops finding anything."""
+        """A name referenced ONLY by tests must still read as dead.
+
+        `engines_running` used to be the example here, and stopped being one on
+        2026-09-18 when the Signal Generator tab's router started calling it —
+        which is the outcome this gate wants, so the example moved rather than
+        the rule. `make_stats_facades` is exported, exercised in tests, and
+        called by nothing in the app.
+
+        The scan looks only at `backend/` on purpose. Widen it to `tests/` and
+        this gate stops finding anything at all.
+        """
         assert not references_to(
-            "engines_running",
-            exclude=("backend/src/controllers/engines_controller.py",))
+            "make_stats_facades",
+            exclude=("backend/src/controllers/sync_controller.py",))
 
 
 @pytest.mark.parametrize("path", _CONTROLLERS)

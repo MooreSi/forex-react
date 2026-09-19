@@ -1,4 +1,18 @@
-nicegui>=1.4.0
+# The dashboard's own server. These arrived transitively through NiceGUI until
+# 2026-09-18, when the last two NiceGUI screens (the pre-boot licence error and
+# activation pages) were ported to plain server-rendered HTML and the framework
+# was removed from this project entirely.
+#
+# ONE CONSEQUENCE, on the admin machine only: the KeyGen licence console
+# (~/Documents/KeyGen/forex_admin.py) is a separate NiceGUI tool that lives
+# OUTSIDE this repository, and backend/src/app.py imports it to offer the Admin
+# button. It fails that import cleanly and the trading app starts either way —
+# the button simply does not appear. If you want the console back on that
+# machine, `pip install nicegui` there, or port it; it is not a dependency of
+# this app.
+fastapi>=0.115.0
+uvicorn>=0.30.0
+itsdangerous>=2.2.0
 httpx>=0.27.0
 pydantic>=2.0.0
 anthropic>=0.36.0
