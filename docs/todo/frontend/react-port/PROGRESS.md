@@ -657,3 +657,75 @@ npm test                     ->  307 passed
 has ever switched anything, and nothing here has touched a broker. Pointing
 this app at a live account for the first time is the owner's to do, with the
 demo session that is already owed.
+
+---
+
+# Task 180 — the ORB card, and where a manual order lands (2026-09-19)
+
+The last card the audit found missing, and the routing gap it exposed on the
+way.
+
+## The ORB report
+
+`frontend/pages/trading/_manual_entry.py` carried the London opening-range
+breakout card and the React port dropped it, so the report, its chart, the
+Execute button, the lot size and the unattended auto-execute were all
+unreachable. `api/routers/orb.py` + `OrbSection`.
+
+Classic ORB: the whole Asian session is a confirmation filter, the first
+fifteen minutes of London is the traded range, and a breakout only counts once
+price clears both in the same direction.
+
+**The stop and target sent to the broker are the ones that were on screen.**
+The report moves as price does, so the execute endpoint takes them from the
+request rather than re-reading — recomputing on the way to the broker would
+open a trade against numbers the operator never saw. A planted mutation that
+recomputed them is caught.
+
+**The chart is rendered by the backend** and returned base64. Drawing it in the
+browser would be a second implementation of the same maths with a second chance
+to disagree with the figures printed beside it. A chart that fails to render
+does not take the report down with it — the numbers are the point.
+
+The 3:1 level is shown and labelled info-only, because the automated path
+closes fully at the 2:1 target and manages no partial ladder. Saying otherwise
+by omission invites the operator to expect a runner.
+
+## The routing gap it exposed
+
+The manual **Market Order** button had the same defect as the Signal Generator
+controls. When the remote node is the active trader this one is stood down and
+`open_trade` refuses with *"Trading stood down — the VPS is the active
+trader"*. That is safe, and it is also a lost capability: the NiceGUI button
+forwarded the order over the sync channel so it executed on the machine holding
+the account. The React port kept the refusal and lost the forwarding.
+
+`remote_control.place_market_order` is that forwarding, and both the Market
+Order button and the ORB Execute go through it. **No fallback** — a peer that
+cannot be reached is a refusal, never a reason to place the order here, because
+here is either stood down or a node the operator believes is idle.
+
+A local `ValueError` still propagates unwrapped: "DPM is disabled and no stop
+loss was given" is the engine saying no with a reason that has to reach the
+screen.
+
+## Evidence
+
+```
+python -m tools.checks all   ->  11 of 11, green
+npm test                     ->  326 passed
+```
+
+12 mutations planted across the routing and the ORB endpoint; 12 caught.
+
+**Not signed off, and this one matters most.** Execute opens a real position,
+and `place_market_order` now decides which machine receives every manual order
+in the app. No test has touched a broker. This belongs at the front of the demo
+session already owed for task 060, the handover, the engine controls and the
+demo/live switch.
+
+## What is left
+
+Controller operations with no caller: **7**, all of them one feature — the
+Analysis deal-level trade table and its calendar, blocked on the facade
+allowlist decision. That is the only item from the discrepancy audit not built.
