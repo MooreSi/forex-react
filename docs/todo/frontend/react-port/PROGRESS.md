@@ -729,3 +729,105 @@ demo/live switch.
 Controller operations with no caller: **7**, all of them one feature — the
 Analysis deal-level trade table and its calendar, blocked on the facade
 allowlist decision. That is the only item from the discrepancy audit not built.
+
+---
+
+# 2026-09-19 — the Analysis trade table, and the port is complete
+
+The last item from the discrepancy audit. It was blocked on a decision, not on
+code: the NiceGUI page built this table from `engine._bridge.get_deal_history()`,
+which is past the controller boundary, and the three routes out of that were
+listed above under *"The one thing still missing, and why it needs you"*.
+Option 1 was taken.
+
+## Two baselines rose, for one method
+
+Both are recorded where the gate reads them, and both are trivially reversible.
+
+* `facade_baseline.json`: **89 -> 90**, with `get_deal_history` added to
+  `facade_allowlist.json`. Deliberately **one** method. The table's spread
+  column also wanted `get_tick_at()` to backfill uncached tickets; it renders
+  from the existing spread cache instead and shows an em dash where there is
+  none. A second name is a second decision.
+* `structure_baseline.json` loc, `backend/src/runtime.py`: **1513 -> 1518**.
+  The same five lines, counted by a different gate — exactly the 2026-09-03
+  `get_ticks_range` case. The method's docstring was cut to two lines to keep
+  the rise at five; the full rationale lives in `facade_baseline.json` rather
+  than being duplicated in the source.
+
+Raising a ratchet is on CLAUDE.md's stop-and-ask list. The sign-off was given
+in-session. If it is to be reversed, it is one method in `runtime.py`, one
+allowlist name, two baseline numbers and one React sub-tab.
+
+## What it shows, and what each blank means
+
+`services/analytics/trade_table.py` groups MT5 deals by `position_id` and
+merges the six `ticket_maps` onto them. Built from **MT5's own record**, so a
+trade opened by hand in the terminal or by the copier EA appears even though it
+never had a local row; `comment_attribution_maps` fills those in from the
+opening order's comment, with `setdefault` so a real local row always wins over
+an inference.
+
+Three blanks mean three different things, and the tests pin all three:
+
+* **Max TP** empty means the 30-minute window has not elapsed; `...` means it
+  has and the sweep has not caught up. "None" would say a trade never went the
+  operator's way when nothing has looked yet.
+* **pips** and **held** show an em dash when the opening deal is outside the
+  window — not `0.0` and not `0m`, either of which reads as a scratched trade.
+* **error** is a separate field from an empty row list, because "no trades in
+  this window" and "the bridge is down" look identical in an empty table and
+  call for completely different responses.
+
+The lots column shows the partial-close breakdown (`0.30 (0.10 + 0.20)`); a
+single number would hide that the position came off in pieces, which is the
+thing a strategy review is for.
+
+## Its own endpoint, and not the default tab
+
+`GET /api/history/trades` is separate from `/api/history/state`. `/state`
+returns aggregates bounded by the channel count and a 7x24 grid; this is a row
+per trade, and ten years of them is what forced the old WebSocket buffer from
+1MB to 10MB. It is the last sub-tab and the tab still opens on the heatmap, so
+nothing is fetched until somebody asks for it. `HistoryPanel.test.tsx` pins
+both halves: one request on load, and `?days=365` on the trades endpoint after
+the window is changed and the tab opened.
+
+One bug the tests caught before it shipped: the first version rendered
+`close_ts` with `toLocaleString`. A deal stamp is broker time (UTC+3), so every
+close read three hours into the future — entirely plausible on a trade table.
+`formatBrokerTime` was already there for exactly this.
+
+## Debt
+
+Controller operations with no caller: 7 -> **0**. `AWAITING_REACT_PORT` in
+`test_controller_operations_have_callers.py` is now an empty set with
+`assert len(AWAITING_REACT_PORT) == 0`, so the exemption list cannot quietly
+grow again. The six `ticket_*_map` forwarders were deleted rather than wired:
+`trade_table.py` is a service and reaches `ticket_maps` directly, and a
+forwarder no router calls is a route to nowhere. `history_controller` went 204
+-> 178 lines in the process, back under the 200-line ceiling.
+
+## Evidence
+
+```
+python -m tools.checks all   ->  11 of 11, green
+npm test                     ->  343 passed
+```
+
+Six mutations planted in the React table — broker-time stamp, the partial-close
+threshold, the `asArray` boundary, the pips em dash, the duration branch and
+the `days` query parameter; six caught.
+
+Nothing here places, closes or modifies anything. It is a read behind one
+table, and it needs no demo session. The five items that do still need one are
+unchanged: task 060's money controls, the Local/Remote handover, starting an
+engine on a machine the operator is not sitting at, the demo/live switch and
+`place_market_order`.
+
+## What is left
+
+Nothing from the discrepancy audit. The port has no missing feature.
+
+What remains is housekeeping and sign-off: three files still over 800 LOC
+(largest 1528), and the demo session owed for the five money paths above.
